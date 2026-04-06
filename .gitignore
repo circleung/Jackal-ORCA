@@ -15,5 +15,3 @@ log/
 tutorials/livox_tutorial/Livox-SDK2/
 tutorials/livox_tutorial/livox_ros_driver2/
 
-# Clearpath (clone separately)
-tutorials/clearpath_simulator/
