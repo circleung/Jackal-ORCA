@@ -6,3 +6,11 @@ __pycache__/
 *.pyc
 .vscode/
 .idea/
+# Build artifacts
+build/
+install/
+log/
+
+# Livox (use submodule or clone separately)
+tutorials/livox_tutorial/Livox-SDK2/
+tutorials/livox_tutorial/livox_ros_driver2/
