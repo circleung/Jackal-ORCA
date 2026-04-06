@@ -20,7 +20,7 @@ ROS2 Humble 환경에서 Intel RealSense 뎁스 카메라 2대와 Livox LiDAR를
 
 본 프로젝트는 커스텀 ROS2 패키지, 튜토리얼 샌드박스, 외부 오픈소스 의존성을 단일 레포지토리에서 통합 관리합니다. 레포지토리 최상단이 곧 ROS2 워크스페이스 역할을 합니다.
 
-\`\`\`text
+```text
 Jackal-ORCA/
 ├── docs/                        # 시스템 아키텍처 다이어그램, 회로도, API 문서
 ├── tutorials/                   # 샌드박스 및 튜토리얼 (센서 구동 예제, 데이터 분석 등)
@@ -35,32 +35,35 @@ Jackal-ORCA/
     ├── jackal_orca_navigation/  # SLAM, Nav2 및 회피 알고리즘 (ORCA) 노드
     ├── jackal_orca_core/        # 상태 머신 및 최상위 제어 노드
     └── jackal_orca_msgs/        # 커스텀 Message, Service, Action 정의
-\`\`\`
+```
 
 ## 🚀 Getting Started
 
 ### 1. Clone the Repository
-\`\`\`bash
+
+```bash
 # 레포지토리를 복제하고 해당 폴더로 이동합니다.
-git clone https://github.com/[본인 깃허브 계정]/Jackal-ORCA.git
+git clone [https://github.com/](https://github.com/)[본인 깃허브 계정]/Jackal-ORCA.git
 cd Jackal-ORCA
-\`\`\`
+```
 
 ### 2. Install Dependencies
+
 외부 오픈소스 패키지(RealSense, Livox 드라이버 등)는 `third_party` 폴더 내의 `.repos` 파일을 통해 관리됩니다. (추후 추가 예정)
 
-\`\`\`bash
+```bash
 # ROS2 환경 로드
 source /opt/ros/humble/setup.bash
-\`\`\`
+```
 
 ### 3. Build Workspace
+
 본 레포지토리 자체가 ROS2 워크스페이스입니다. `Jackal-ORCA` 최상단 디렉토리에서 빌드를 진행합니다.
 
-\`\`\`bash
+```bash
 # 전체 패키지 빌드
 colcon build --symlink-install
 
 # 빌드된 환경 적용
 source install/setup.bash
-\`\`\`
+```
