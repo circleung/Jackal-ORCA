@@ -1,6 +1,6 @@
 # 🚙 Jackal-ORCA Project
 
-**Jackal UGV project for Obstacle Recognition and Clustering-based Avoidance.**
+**Jackal UGV project for Obstacle Recognition and Clustering-based Annihilation.**
 ROS2 Humble 환경에서 Intel RealSense 뎁스 카메라 2대와 Livox LiDAR를 융합하여, 고밀도 장애물 탐지 및 회피, 그리고 SLAM 기반 자율주행을 구현하는 시스템입니다.
 
 ## 🌟 Overview
