@@ -1,0 +1,23 @@
+<?xml version="1.0" ?>
+<sdf version="1.7">
+  <model name="apriltag_board">
+    <static>true</static>
+    <link name="link">
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>0.02 0.40 0.40</size>
+          </box>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <pose>0 0 0 0 1.57079632679 0</pose>
+        <geometry>
+          <mesh>
+            <uri>model://apriltag_board/meshes/tag_plane.obj</uri>
+          </mesh>
+        </geometry>
+      </visual>
+    </link>
+  </model>
+</sdf>
