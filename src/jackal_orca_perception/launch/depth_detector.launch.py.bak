@@ -1,0 +1,33 @@
+"""
+depth_detector.launch.py
+Camera1(전방), Camera2(후방) 각각에 depth_object_detector 실행
+"""
+
+from launch import LaunchDescription
+from launch_ros.actions import Node
+
+
+def make_detector(camera_name):
+    return Node(
+        package='jackal_orca_perception',
+        executable='depth_object_detector.py',
+        name=f'depth_detector_{camera_name}',
+        parameters=[{
+            'camera_name': camera_name,
+            'min_distance_m': 0.3,
+            'max_distance_m': 5.0,
+            'min_area_px': 200,
+            'warn_dist_m': 1.5,
+            'danger_dist_m': 0.8,
+            'morph_kernel': 3,
+            'floor_crop_ratio': 0.55,
+        }],
+        output='screen',
+    )
+
+
+def generate_launch_description():
+    return LaunchDescription([
+        make_detector('camera1'),
+        make_detector('camera2'),
+    ])

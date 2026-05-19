@@ -2,12 +2,19 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>jackal_orca_bringup</name>
-  <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <version>0.0.1</version>
+  <description>Jackal-ORCA 통합 bringup launch (카메라 2대 + LiDAR + RViz)</description>
   <maintainer email="rokyp1278@gmail.com">das</maintainer>
-  <license>TODO: License declaration</license>
+  <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- launch 시 사용하는 패키지들 -->
+  <exec_depend>realsense2_camera</exec_depend>
+  <exec_depend>livox_ros_driver2</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

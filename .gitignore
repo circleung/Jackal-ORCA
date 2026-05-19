@@ -1,17 +1,24 @@
+# ROS2 build artifacts
 build/
 install/
 log/
 
+# Python
 __pycache__/
 *.pyc
+*.pyo
+
+# IDE
 .vscode/
 .idea/
-# Build artifacts
-build/
-install/
-log/
+*.swp
 
-# Livox (use submodule or clone separately)
+# OS
+.DS_Store
+
+# 외부 의존성 (vcstool로 third_party.repos 통해 가져옴)
+src/livox_ros_driver2/
+
+# Livox SDK는 시스템에 install 하므로 굳이 추적 안 함
 tutorials/livox_tutorial/Livox-SDK2/
 tutorials/livox_tutorial/livox_ros_driver2/
-
