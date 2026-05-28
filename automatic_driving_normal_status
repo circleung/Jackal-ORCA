@@ -1,0 +1,553 @@
+Automatic_driving_algorithm in normal status
+
+* bash창에 입력
+frontier_apriltag_explorer_node.py
+
+아래는 자율주행 python.py 코드
+#!/usr/bin/env python3
+
+import math
+import random
+from collections import deque
+
+import rclpy
+from rclpy.node import Node
+
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import OccupancyGrid
+from sensor_msgs.msg import LaserScan
+
+from tf2_ros import Buffer, TransformListener
+from tf_transformations import euler_from_quaternion
+
+# AprilTag 메시지 타입
+# 사용하는 패키지에 따라 다를 수 있음
+# 보통 apriltag_ros 사용 시 아래 타입을 많이 씀
+try:
+    from apriltag_msgs.msg import AprilTagDetectionArray
+except ImportError:
+    AprilTagDetectionArray = None
+
+
+class FrontierAprilTagExplorer(Node):
+    def __init__(self):
+        super().__init__("frontier_apriltag_explorer_node")
+
+        # =========================
+        # Parameter
+        # =========================
+        self.map_topic = "/map"
+        self.scan_topic = "/scan"
+        self.cmd_vel_topic = "/cmd_vel"
+        self.tag_topic = "/tag_detections"
+
+        self.robot_frame = "base_link"
+        self.map_frame = "map"
+
+        # 주행 속도
+        self.max_linear_speed = 0.25
+        self.max_angular_speed = 0.6
+
+        # 장애물 회피 기준
+        self.front_obstacle_distance = 0.7
+
+        # AprilTag 접근 기준
+        self.target_tag_distance = 1.0
+        self.tag_distance_tolerance = 0.15
+        self.tag_center_tolerance = 0.08
+
+        # 태그가 화면 중앙에서 얼마나 벗어났는지 제어할 때 사용
+        self.kp_angular = 1.2
+        self.kp_linear = 0.4
+
+        # Frontier 도달 판단 거리
+        self.goal_tolerance = 0.4
+
+        # =========================
+        # State
+        # =========================
+        self.state = "SEARCH_FRONTIER"
+
+        self.map_data = None
+        self.map_width = None
+        self.map_height = None
+        self.map_resolution = None
+        self.map_origin_x = None
+        self.map_origin_y = None
+
+        self.current_goal = None
+
+        self.front_min_range = float("inf")
+
+        self.tag_detected = False
+        self.tag_center_error = 0.0
+        self.tag_distance = None
+        self.current_tag_id = None
+        self.visited_tags = set()
+
+        self.last_tag_seen_time = None
+
+        # =========================
+        # ROS
+        # =========================
+        self.cmd_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
+
+        self.map_sub = self.create_subscription(
+            OccupancyGrid,
+            self.map_topic,
+            self.map_callback,
+            10
+        )
+
+        self.scan_sub = self.create_subscription(
+            LaserScan,
+            self.scan_topic,
+            self.scan_callback,
+            10
+        )
+
+        if AprilTagDetectionArray is not None:
+            self.tag_sub = self.create_subscription(
+                AprilTagDetectionArray,
+                self.tag_topic,
+                self.tag_callback,
+                10
+            )
+        else:
+            self.get_logger().warn(
+                "apriltag_msgs 패키지를 찾지 못했습니다. "
+                "AprilTag 감지 기능은 비활성화됩니다."
+            )
+
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
+        self.timer = self.create_timer(0.1, self.control_loop)
+
+        self.get_logger().info("Frontier + AprilTag Explorer Node Started")
+
+    # ============================================================
+    # Callback
+    # ============================================================
+
+    def map_callback(self, msg: OccupancyGrid):
+        self.map_data = list(msg.data)
+        self.map_width = msg.info.width
+        self.map_height = msg.info.height
+        self.map_resolution = msg.info.resolution
+        self.map_origin_x = msg.info.origin.position.x
+        self.map_origin_y = msg.info.origin.position.y
+
+    def scan_callback(self, msg: LaserScan):
+        ranges = list(msg.ranges)
+
+        valid_ranges = [
+            r for r in ranges
+            if not math.isinf(r) and not math.isnan(r)
+        ]
+
+        if not valid_ranges:
+            self.front_min_range = float("inf")
+            return
+
+        # 전방 약 ±30도 영역만 사용
+        total = len(ranges)
+        center = total // 2
+        window = total // 12
+
+        front_ranges = ranges[center - window:center + window]
+
+        front_valid = [
+            r for r in front_ranges
+            if not math.isinf(r) and not math.isnan(r)
+        ]
+
+        if front_valid:
+            self.front_min_range = min(front_valid)
+        else:
+            self.front_min_range = float("inf")
+
+    def tag_callback(self, msg):
+        if len(msg.detections) == 0:
+            self.tag_detected = False
+            return
+
+        # 여러 태그 중 첫 번째 태그 사용
+        detection = msg.detections[0]
+
+        try:
+            tag_id = detection.id[0]
+        except Exception:
+            tag_id = 0
+
+        if tag_id in self.visited_tags:
+            self.tag_detected = False
+            return
+
+        self.current_tag_id = tag_id
+        self.tag_detected = True
+        self.last_tag_seen_time = self.get_clock().now()
+
+        # AprilTag pose 정보 읽기
+        # apriltag_ros 메시지 구조 기준
+        try:
+            pose = detection.pose.pose.pose
+            x = pose.position.x
+            y = pose.position.y
+            z = pose.position.z
+
+            # 카메라 기준 좌우 오차
+            # 보통 x: 좌우, z: 전방 거리
+            self.tag_center_error = x / max(z, 0.001)
+            self.tag_distance = z
+
+        except Exception:
+            self.get_logger().warn("AprilTag pose 정보를 읽지 못했습니다.")
+            self.tag_center_error = 0.0
+            self.tag_distance = None
+
+    # ============================================================
+    # Main FSM
+    # ============================================================
+
+    def control_loop(self):
+        if self.map_data is None:
+            self.stop_robot()
+            return
+
+        # AprilTag가 보이면 언제든지 태그 접근 모드로 전환
+        if self.tag_detected and self.state not in ["ALIGN_TAG", "APPROACH_TAG", "CAPTURE_TAG"]:
+            self.get_logger().info(f"AprilTag detected: ID {self.current_tag_id}")
+            self.state = "ALIGN_TAG"
+
+        if self.state == "SEARCH_FRONTIER":
+            self.search_frontier_state()
+
+        elif self.state == "MOVE_TO_FRONTIER":
+            self.move_to_frontier_state()
+
+        elif self.state == "ALIGN_TAG":
+            self.align_tag_state()
+
+        elif self.state == "APPROACH_TAG":
+            self.approach_tag_state()
+
+        elif self.state == "CAPTURE_TAG":
+            self.capture_tag_state()
+
+        elif self.state == "AVOID_OBSTACLE":
+            self.avoid_obstacle_state()
+
+        else:
+            self.stop_robot()
+            self.state = "SEARCH_FRONTIER"
+
+    # ============================================================
+    # State Functions
+    # ============================================================
+
+    def search_frontier_state(self):
+        robot_pose = self.get_robot_pose()
+
+        if robot_pose is None:
+            self.stop_robot()
+            return
+
+        frontier_points = self.find_frontiers()
+
+        if len(frontier_points) == 0:
+            self.get_logger().info("No frontier found. Exploration finished or map unavailable.")
+            self.stop_robot()
+            return
+
+        # 현재 위치에서 가장 가까운 frontier 선택
+        rx, ry, _ = robot_pose
+        best_frontier = min(
+            frontier_points,
+            key=lambda p: math.hypot(p[0] - rx, p[1] - ry)
+        )
+
+        self.current_goal = best_frontier
+        self.get_logger().info(
+            f"New frontier goal: x={best_frontier[0]:.2f}, y={best_frontier[1]:.2f}"
+        )
+
+        self.state = "MOVE_TO_FRONTIER"
+
+    def move_to_frontier_state(self):
+        if self.current_goal is None:
+            self.state = "SEARCH_FRONTIER"
+            return
+
+        # 전방 장애물 있으면 회피
+        if self.front_min_range < self.front_obstacle_distance:
+            self.state = "AVOID_OBSTACLE"
+            return
+
+        robot_pose = self.get_robot_pose()
+
+        if robot_pose is None:
+            self.stop_robot()
+            return
+
+        rx, ry, yaw = robot_pose
+        gx, gy = self.current_goal
+
+        dx = gx - rx
+        dy = gy - ry
+
+        distance = math.hypot(dx, dy)
+        target_yaw = math.atan2(dy, dx)
+
+        yaw_error = self.normalize_angle(target_yaw - yaw)
+
+        if distance < self.goal_tolerance:
+            self.get_logger().info("Frontier reached.")
+            self.current_goal = None
+            self.state = "SEARCH_FRONTIER"
+            return
+
+        cmd = Twist()
+
+        # 목표 방향과 많이 틀어져 있으면 회전 우선
+        if abs(yaw_error) > 0.4:
+            cmd.linear.x = 0.0
+            cmd.angular.z = self.clamp(
+                1.2 * yaw_error,
+                -self.max_angular_speed,
+                self.max_angular_speed
+            )
+        else:
+            cmd.linear.x = self.max_linear_speed
+            cmd.angular.z = self.clamp(
+                0.8 * yaw_error,
+                -self.max_angular_speed,
+                self.max_angular_speed
+            )
+
+        self.cmd_pub.publish(cmd)
+
+    def align_tag_state(self):
+        if not self.tag_detected:
+            self.get_logger().info("Tag lost. Return to exploration.")
+            self.state = "SEARCH_FRONTIER"
+            return
+
+        cmd = Twist()
+
+        # 태그가 화면 중앙에 오도록 회전
+        error = self.tag_center_error
+
+        if abs(error) < self.tag_center_tolerance:
+            self.get_logger().info("Tag aligned.")
+            self.stop_robot()
+            self.state = "APPROACH_TAG"
+            return
+
+        cmd.linear.x = 0.0
+        cmd.angular.z = self.clamp(
+            -self.kp_angular * error,
+            -self.max_angular_speed,
+            self.max_angular_speed
+        )
+
+        self.cmd_pub.publish(cmd)
+
+    def approach_tag_state(self):
+        if not self.tag_detected or self.tag_distance is None:
+            self.get_logger().info("Tag lost while approaching. Return to exploration.")
+            self.state = "SEARCH_FRONTIER"
+            return
+
+        # 장애물이 너무 가까우면 정지
+        if self.front_min_range < 0.4:
+            self.get_logger().warn("Obstacle too close while approaching tag.")
+            self.stop_robot()
+            self.state = "CAPTURE_TAG"
+            return
+
+        distance_error = self.tag_distance - self.target_tag_distance
+        center_error = self.tag_center_error
+
+        # 거리와 중앙 정렬 조건 만족
+        if (
+            abs(distance_error) < self.tag_distance_tolerance
+            and abs(center_error) < self.tag_center_tolerance
+        ):
+            self.get_logger().info("Tag capture position reached.")
+            self.stop_robot()
+            self.state = "CAPTURE_TAG"
+            return
+
+        cmd = Twist()
+
+        # 전진/후진
+        cmd.linear.x = self.clamp(
+            self.kp_linear * distance_error,
+            -0.15,
+            0.20
+        )
+
+        # 접근 중에도 중앙 보정
+        cmd.angular.z = self.clamp(
+            -self.kp_angular * center_error,
+            -0.4,
+            0.4
+        )
+
+        self.cmd_pub.publish(cmd)
+
+    def capture_tag_state(self):
+        self.stop_robot()
+
+        if self.current_tag_id is not None:
+            self.visited_tags.add(self.current_tag_id)
+            self.get_logger().info(f"Captured AprilTag ID: {self.current_tag_id}")
+
+        # 실제 촬영 코드가 필요하면 여기에서 이미지 저장 로직 추가
+        # 예: /camera/image_raw 구독 후 cv_bridge로 저장
+
+        self.tag_detected = False
+        self.current_tag_id = None
+        self.tag_distance = None
+        self.tag_center_error = 0.0
+
+        self.state = "SEARCH_FRONTIER"
+
+    def avoid_obstacle_state(self):
+        cmd = Twist()
+
+        # 단순 장애물 회피
+        # 앞이 막히면 제자리 회전
+        if self.front_min_range < self.front_obstacle_distance:
+            cmd.linear.x = 0.0
+            cmd.angular.z = 0.45
+            self.cmd_pub.publish(cmd)
+        else:
+            self.stop_robot()
+            self.state = "MOVE_TO_FRONTIER"
+
+    # ============================================================
+    # Frontier Detection
+    # ============================================================
+
+    def find_frontiers(self):
+        frontiers = []
+
+        if self.map_data is None:
+            return frontiers
+
+        for y in range(1, self.map_height - 1):
+            for x in range(1, self.map_width - 1):
+                idx = self.grid_to_index(x, y)
+
+                # free cell만 frontier 후보가 될 수 있음
+                if self.map_data[idx] != 0:
+                    continue
+
+                if self.is_next_to_unknown(x, y):
+                    wx, wy = self.grid_to_world(x, y)
+                    frontiers.append((wx, wy))
+
+        # 너무 많은 frontier 중 일부만 샘플링
+        if len(frontiers) > 300:
+            frontiers = random.sample(frontiers, 300)
+
+        return frontiers
+
+    def is_next_to_unknown(self, x, y):
+        neighbors = [
+            (x + 1, y),
+            (x - 1, y),
+            (x, y + 1),
+            (x, y - 1),
+            (x + 1, y + 1),
+            (x - 1, y - 1),
+            (x + 1, y - 1),
+            (x - 1, y + 1),
+        ]
+
+        for nx, ny in neighbors:
+            if nx < 0 or ny < 0 or nx >= self.map_width or ny >= self.map_height:
+                continue
+
+            nidx = self.grid_to_index(nx, ny)
+
+            # OccupancyGrid에서 -1은 unknown
+            if self.map_data[nidx] == -1:
+                return True
+
+        return False
+
+    # ============================================================
+    # TF / Utility
+    # ============================================================
+
+    def get_robot_pose(self):
+        try:
+            trans = self.tf_buffer.lookup_transform(
+                self.map_frame,
+                self.robot_frame,
+                rclpy.time.Time()
+            )
+
+            x = trans.transform.translation.x
+            y = trans.transform.translation.y
+
+            q = trans.transform.rotation
+            quaternion = [q.x, q.y, q.z, q.w]
+
+            _, _, yaw = euler_from_quaternion(quaternion)
+
+            return x, y, yaw
+
+        except Exception:
+            return None
+
+    def grid_to_index(self, x, y):
+        return y * self.map_width + x
+
+    def grid_to_world(self, gx, gy):
+        wx = self.map_origin_x + gx * self.map_resolution
+        wy = self.map_origin_y + gy * self.map_resolution
+        return wx, wy
+
+    def world_to_grid(self, wx, wy):
+        gx = int((wx - self.map_origin_x) / self.map_resolution)
+        gy = int((wy - self.map_origin_y) / self.map_resolution)
+        return gx, gy
+
+    def normalize_angle(self, angle):
+        while angle > math.pi:
+            angle -= 2.0 * math.pi
+        while angle < -math.pi:
+            angle += 2.0 * math.pi
+        return angle
+
+    def clamp(self, value, min_value, max_value):
+        return max(min(value, max_value), min_value)
+
+    def stop_robot(self):
+        cmd = Twist()
+        cmd.linear.x = 0.0
+        cmd.angular.z = 0.0
+        self.cmd_pub.publish(cmd)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+
+    node = FrontierAprilTagExplorer()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+
+    node.stop_robot()
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()
