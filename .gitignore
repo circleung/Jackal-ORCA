@@ -1,0 +1,36 @@
+# ── 빌드 산출물 (절대 커밋 안 함) ──
+/build/
+/install/
+/log/
+
+# ── SLAM 맵 저장 결과 (실행 산출물, 대용량 바이너리) ──
+src/tag_hotspot_nav/maps/
+
+# ── 실행 중 생성되는 데이터 ──
+tag_observations.json
+tag_clusters.json
+*.posegraph
+*.data
+
+# ── 벤더 패키지 (dependencies.repos / ros2.repos 로 복원) ──
+/src/clearpath_common/
+/src/clearpath_robot/
+/src/clearpath_ros2_socketcan_interface/
+/src/livox_ros_driver2/
+/src/micro_ros_setup/
+/src/uros/
+
+# ── 대용량 메시 (바이너리; 선택 범위상 제외) ──
+src/roas2_bringup/meshes/
+
+# ── 파이썬 캐시 ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# ── 에디터 / OS ──
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

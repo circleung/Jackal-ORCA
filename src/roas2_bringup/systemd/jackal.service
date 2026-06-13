@@ -1,0 +1,10 @@
+[Unit]
+After=NetworkManager.service time-sync.target
+
+[Service]
+Type=simple
+User=jackal
+ExecStart=/usr/sbin/jackal
+
+[Install]
+WantedBy=multi-user.target

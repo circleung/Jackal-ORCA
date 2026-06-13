@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="j100">
+
+  <xacro:property name="PI" value="3.1415926535897931"/>
+
+  <xacro:include filename="$(find clearpath_platform_description)/urdf/common.urdf.xacro"/>
+  <!-- Platform -->
+  <xacro:include filename="$(find roas2_bringup)/urdf/include/j100.urdf.xacro"/>
+  <xacro:j100/>
+
+
+  <!-- Attachments -->
+
+  <xacro:include filename="$(find clearpath_platform_description)/urdf/j100/attachments/fender.urdf.xacro"/>
+  <xacro:fender name="front_fender" model="default" parent_link="base_link">
+    <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
+  </xacro:fender>
+
+  <xacro:include filename="$(find clearpath_platform_description)/urdf/j100/attachments/fender.urdf.xacro"/>
+  <xacro:fender name="rear_fender" model="default" parent_link="base_link">
+    <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 -${PI}"/>
+  </xacro:fender>
+
+</robot>

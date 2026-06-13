@@ -1,0 +1,15 @@
+serial_number: j100-0915
+version: 0
+system:
+  hosts:
+    - hostname: jackal
+      ip: 192.168.10.10
+  ros2:
+    namespace: j100_0915
+platform:
+  attachments:
+    - name: front_fender
+      type: j100.fender
+    - name: rear_fender
+      type: j100.fender
+      rpy: [0.0, 0.0, 3.1415]

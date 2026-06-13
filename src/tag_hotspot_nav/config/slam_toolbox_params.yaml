@@ -1,0 +1,93 @@
+# =====================================================================
+# slam_toolbox_params.yaml — 실기체(Jackal + MID360) 정밀 2D SLAM 설정
+#
+# 입력:
+#   /scan       : pointcloud_to_laserscan 이 MID360 포인트클라우드에서 변환
+#   odom→base_link TF : diff_drive_controller (enable_odom_tf: True)
+# 출력:
+#   /map (OccupancyGrid) + map→odom TF
+#
+# 정밀도 우선 튜닝 (기존 Gazebo용 slam_params.yaml 대비):
+#   - minimum_travel_distance 0.5→0.2, heading 0.5→0.25
+#     : 그래프 노드를 촘촘히 → 스키드스티어 휠오돔 회전 드리프트를
+#       스캔매칭이 더 자주 보정
+#   - map_update_interval 5.0→2.0 : 맵 갱신 빠르게 (탐사 중 frontier 판단용)
+#   - max_laser_range 15m : MID360 실내 신뢰 구간만 사용 (원거리 노이즈 배제)
+# =====================================================================
+
+slam_toolbox:
+  ros__parameters:
+    use_sim_time: false
+
+    # ── Solver ────────────────────────────────────────────────────
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # ── Frames / Topic ───────────────────────────────────────────
+    odom_frame: odom
+    map_frame:  map
+    base_frame: base_link
+    scan_topic: /scan
+
+    # ── Mode / Map ───────────────────────────────────────────────
+    mode: mapping
+    map_update_interval: 2.0
+    resolution: 0.05
+    use_map_saver: true
+
+    # ── Scan matching ────────────────────────────────────────────
+    use_scan_matching: true
+    use_scan_barycenter: true
+    minimum_travel_distance: 0.2     # [m]  촘촘한 그래프 → 정밀도↑
+    minimum_travel_heading: 0.25     # [rad]
+    scan_buffer_size: 20
+    scan_buffer_maximum_scan_distance: 15.0
+    min_laser_range: 0.45    # 로봇 본체(폭 0.43m) 자기 몸 스캔 방지
+    max_laser_range: 15.0    # MID360 실내 신뢰 구간
+
+    # ── TF ───────────────────────────────────────────────────────
+    transform_publish_period: 0.02
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+
+    # ── Loop closing ─────────────────────────────────────────────
+    do_loop_closing: true
+    loop_match_minimum_chain_size: 10
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+    loop_search_maximum_distance: 5.0
+
+    # ── Correlation search ───────────────────────────────────────
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+
+    # ── Loop search ──────────────────────────────────────────────
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    # ── Penalty ──────────────────────────────────────────────────
+    # 스키드스티어는 회전 오돔이 잘 미끄러짐 → 각도 패널티를 낮춰
+    # 스캔매칭이 회전 보정을 더 적극적으로 하게 함
+    distance_variance_penalty: 0.5
+    angle_variance_penalty: 0.7
+
+    # ── Misc ─────────────────────────────────────────────────────
+    debug_logging: false
+    throttle_scans: 1
+    enable_interactive_mode: false
+    stack_size_to_use: 40000000
+    link_match_minimum_response_fine: 0.1
+    link_scan_maximum_distance: 1.5
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    use_response_expansion: true

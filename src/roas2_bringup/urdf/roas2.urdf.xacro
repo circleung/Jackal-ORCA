@@ -1,0 +1,80 @@
+<?xml version="1.0"?>
+
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="roas">
+  
+  <material name="Black"><color rgba="${1/255} ${1/255} ${1/255} 1.0"/></material>
+  <material name="dark_grey"><color rgba="0.2 0.2 0.2 1.0"/></material>
+
+  <xacro:property name="PI" value="3.1415926535897931"/>
+  <xacro:include filename="$(find roas2_bringup)/urdf/include/robot.urdf.xacro" />
+  
+  <xacro:include filename="$(find roas2_bringup)/urdf/include/ouster.urdf.xacro"/>
+  <xacro:include filename="$(find roas2_bringup)/urdf/include/d435.urdf.xacro"/>
+
+  <!-- Frame -->
+  <link name="top_structure">
+  <visual>
+    <origin xyz="0 0 -0.065" rpy="${PI/2} 0 ${PI/2}" />
+    <geometry>
+      <mesh filename="package://roas2_bringup/meshes/frame.STL" />
+    </geometry>
+    <material name="dark_grey"/>
+  </visual>
+  <collision>
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <geometry>
+      <mesh filename="package://roas2_bringup/meshes/frame.STL" />
+    </geometry>
+  </collision>
+  </link>
+
+  <joint name="top_structure_joint" type="fixed">
+    <parent link="base_link" />
+    <child link="top_structure" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+  </joint>
+  
+  <xacro:sensor_ouster parent="top_structure" name="os_sensor">
+    <origin xyz="0 0 0.447" rpy="0 0 0"/>
+  </xacro:sensor_ouster>
+
+  <!-- Camera -->
+  <!-- Front Right -->
+  <xacro:sensor_d435 parent="top_structure" name="fr_cam">
+    <origin xyz="0.160 -0.143 0.218" rpy="0 0 -${PI/6}"/>
+  </xacro:sensor_d435>
+  
+  <!-- Front Left -->
+  <xacro:sensor_d435 parent="top_structure" name="fl_cam">
+    <origin xyz="0.160 0.143 0.218" rpy="0 0 ${PI/6}"/>
+  </xacro:sensor_d435>
+  
+  <!-- Front Middle -->
+  <xacro:sensor_d435 parent="top_structure" name="fm_cam">
+    <origin xyz="0.22615 0 0.218" rpy="0 0 0"/>
+  </xacro:sensor_d435>
+  
+  <!-- Back -->
+  <xacro:sensor_d435 parent="top_structure" name="b_cam">
+    <origin xyz="-0.22615 0 0.218" rpy="0 0 ${-PI}"/>
+  </xacro:sensor_d435>
+  
+  <!-- Microstrain -->
+  <link name="mi_link"/>
+  
+  <joint name="mi_joint" type="fixed">
+    <parent link="top_structure"/>
+    <child link="mi_link"/>
+    <origin xyz="-0.1001 0 0.0663" rpy="0 0 0"/>
+  </joint>
+  
+  <!-- ZED-Ublox -->
+  <link name="ublox_link"/>
+  
+  <joint name="ublox_joint" type="fixed">
+    <parent link="top_structure"/>
+    <child link="ublox_link"/>
+    <origin xyz="0.0 0.0 0.547" rpy="0 0 0"/>
+  </joint>
+  
+</robot>

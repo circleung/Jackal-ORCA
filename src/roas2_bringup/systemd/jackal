@@ -1,0 +1,12 @@
+#!/bin/bash
+
+source /opt/ros/jazzy/setup.bash
+source ~/colcon_ws/install/setup.bash
+
+sleep 10
+
+export ROS_HOSTNAME=jackal
+export ROS_MASTER_URI=http://jackal:11311
+export ROS_HOME=~/.ros
+
+ros2 launch roas2_bringup platform.launch.py

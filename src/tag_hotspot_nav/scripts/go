@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec ros2 run tag_hotspot_nav go "$@"

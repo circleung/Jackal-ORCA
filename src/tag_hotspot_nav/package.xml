@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>tag_hotspot_nav</name>
+  <version>0.1.0</version>
+  <description>
+    2D SLAM 기반 태그 밀집 클러스터링 자율탐사 시스템.
+    slam_toolbox(2D SLAM) + YOLO/depth 태그 수집 + DBSCAN hotspot + A*/pure pursuit.
+  </description>
+  <maintainer email="eximy590@jbnu.ac.kr">jackal</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
+  <depend>custom_msgs</depend>
+  <depend>apriltag_msgs</depend>
+
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>pointcloud_to_laserscan</exec_depend>
+  <exec_depend>livox_ros_driver2</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
