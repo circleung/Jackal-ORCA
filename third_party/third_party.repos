@@ -1,0 +1,5 @@
+repositories:
+  jackal_simulator:
+    type: git
+    url: https://github.com/jackal/jackal_simulator.git
+    version: humble

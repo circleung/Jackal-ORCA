@@ -2,6 +2,9 @@
 /build/
 /install/
 /log/
+build/
+install/
+log/
 
 # ── SLAM 맵 저장 결과 (실행 산출물, 대용량 바이너리) ──
 src/tag_hotspot_nav/maps/
@@ -19,6 +22,10 @@ tag_clusters.json
 /src/livox_ros_driver2/
 /src/micro_ros_setup/
 /src/uros/
+
+# ── Livox 튜토리얼 (별도 clone/submodule) ──
+tutorials/livox_tutorial/Livox-SDK2/
+tutorials/livox_tutorial/livox_ros_driver2/
 
 # ── 대용량 메시 (바이너리; 선택 범위상 제외) ──
 src/roas2_bringup/meshes/
