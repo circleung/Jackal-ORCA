@@ -40,7 +40,7 @@ class TagCenteringNode(Node):
         self.declare_parameter('max_center_time', 4.0)    # [s] 정렬 타임아웃
         self.declare_parameter('dwell_time', 2.0)         # [s] 정렬 후 관측 정지
         self.declare_parameter('cooldown', 10.0)          # [s] 재트리거 방지
-        self.declare_parameter('candidate_timeout', 0.7)  # [s] 후보 끊기면 태그 놓침
+        self.declare_parameter('candidate_timeout', 1.5)  # [s] 후보 끊기면 태그 놓침
         self.declare_parameter('only_front', True)        # front 카메라 후보만 정렬
         self.declare_parameter('base_frame', 'base_link')
         self.declare_parameter('map_frame', 'map')
@@ -62,7 +62,7 @@ class TagCenteringNode(Node):
         self.match_tol = float(self.get_parameter('match_tol').value)
 
         self.state = IDLE
-        self._explore_active = False     # 외부 go/resume 시 True (탐사 중일 때만 동작)
+        self._explore_active = True     # 외부 go/resume 시 True (탐사 중일 때만 동작)
         self._bearing = 0.0
         self._cand_t = None              # 마지막 후보 수신 시각
         self._t0 = 0.0                   # 상태 진입 시각
@@ -174,7 +174,7 @@ class TagCenteringNode(Node):
                 self.state = DWELL; self._t0 = now
             else:
                 # bearing>0(좌)이면 +회전(좌), bearing<0(우)이면 -회전
-                self._pub_cmd(0.0, math.copysign(self.ang_spd, self._bearing))
+                self._pub_cmd(0.0, math.copysign(self.ang_spd * min(1.0, abs(self._bearing) / 0.3), self._bearing))
 
         elif self.state == DWELL:
             self._pub_cmd(0.0, 0.0)              # 정지 유지 → 관측 누적
