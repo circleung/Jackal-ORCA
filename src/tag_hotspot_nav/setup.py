@@ -54,6 +54,8 @@ setup(
             'clustering = tag_hotspot_nav.clustering:main',
             # 4단계: hotspot 순차 접근 FSM (A*+pure_pursuit 재사용)
             'hotspot_navigator = tag_hotspot_nav.hotspot_navigator:main',
+            # PS4 X버튼 비상정지 — platform/safety_stop + /pause 토글
+            'joy_estop = tag_hotspot_nav.joy_estop:main',
         ],
     },
 )
