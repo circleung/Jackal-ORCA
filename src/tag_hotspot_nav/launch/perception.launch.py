@@ -101,24 +101,7 @@ def generate_launch_description():
             parameters=[{'tag_size': tag_size, 'map_frame': map_frame}],
             remappings=tf_remaps,
         ),
-        # 4) tag_centering — YOLO 후보 감지 시 탐사 일시정지 + 태그 정렬
-        Node(
-            package='tag_hotspot_nav',
-            executable='tag_centering',
-            name='tag_centering',
-            output='screen',
-            parameters=[{
-                'cmd_vel_topic': '/j100_0915/cmd_vel',
-                'trigger_conf': 0.5,
-                'center_tol': 0.12,
-                'angular_speed': 0.4,
-                'dwell_time': 2.0,
-                'cooldown': 10.0,
-            }],
-            remappings=tf_remaps,
-        ),
-
-        # 5) clustering — 누적 태그 DBSCAN 군집화 → /hotspots (Phase 3)
+        # 4) clustering — 누적 태그 DBSCAN 군집화 → /hotspots (Phase 3)
         Node(
             package='tag_hotspot_nav',
             executable='clustering',
