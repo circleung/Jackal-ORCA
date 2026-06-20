@@ -30,17 +30,11 @@ def generate_launch_description():
     use_sound = LaunchConfiguration('use_sound')
     use_map_cleaner = LaunchConfiguration('use_map_cleaner')
     use_tag_centering = LaunchConfiguration('use_tag_centering')
-    use_cliff_stop = LaunchConfiguration('use_cliff_stop')
     dynamic_clean = LaunchConfiguration('dynamic_clean')
 
     # map_cleaner 켜면 frontier 는 잔상 제거된 /map_nav 를 본다
     map_topic = PythonExpression(
         ["'/map_nav' if '", use_map_cleaner, "' == 'true' else '/map'"])
-
-    # cliff 핸들링(use_cliff_stop) off 면 map_cleaner 의 /cliff_alert 도 끊어 keep-out 안 생기게
-    # (오탐 회피). on 이면 그대로 /cliff_alert 구독 → 계단 keep-out 동작.
-    cleaner_cliff_topic = PythonExpression(
-        ["'/cliff_alert' if '", use_cliff_stop, "' == 'true' else '/cliff_alert_ignored'"])
 
     # Clearpath bringup 이 TF 를 /j100_0915/tf(_static) 로 발행 → TF 쓰는 노드는 리매핑 필요
     tf_remaps = [
@@ -65,8 +59,6 @@ def generate_launch_description():
                               description='동적장애물 잔상 제거(map_cleaner) → frontier 가 /map_nav 사용'),
         DeclareLaunchArgument('use_tag_centering', default_value='true',
                               description='매핑 중 태그 후보에 정렬해 또렷이 포착(tag_centering)'),
-        DeclareLaunchArgument('use_cliff_stop', default_value='true',
-                              description='젯슨 /cliff_alert → 정지 브리지(cliff_stop)'),
         DeclareLaunchArgument('dynamic_clean', default_value='false',
                               description='map_cleaner 동적 clear+/scan 장애물 마킹(off면 slam맵+keep-out만)'),
 
@@ -76,11 +68,9 @@ def generate_launch_description():
             name='frontier_explorer',
             output='screen',
             parameters=[{
-                # 0.25(5셀, 통로>0.50m) → 0.20(4셀, 통로>0.40m). 본체 0.43m라 0.40~0.43m
-                # 통로는 계획에 잡히지만 빡빡함(좁은통로 통과용, 사용자 요청). 5cm격자라 중간값 없음.
                 'robot_radius': 0.20,
-                'goal_timeout': 100.0,   # 먼 목표도 끝까지 추종(15→100, 사용자 요청). 막힘은 no_progress(30s)가 따로 잡음
-                'no_frontier_limit': 5,   # 종료 조건: 진행불가 연속 N회 (기본 30 → 5)
+                'goal_timeout': 100.0,
+                'no_frontier_limit': 5,
             }],
             remappings=tf_remaps + [('/map', map_topic)],
         ),
@@ -94,20 +84,14 @@ def generate_launch_description():
                 'linear_speed': linear_speed,
                 'lookahead': 0.4,
                 'goal_tolerance': 0.30,
-                # 전방 정지 마진 확대(사용자 요청): base_link 기준 0.60m 에서 정지.
-                # 차체 앞단 ~0.26m → 실측 앞단~장애물 간격 ~0.34m 에서 멈춤.
-                # slow_down 은 항상 stop 보다 커야 함 → 1.10 부터 감속.
                 'stop_dist': 0.60,
                 'slow_down_dist': 1.10,
-                # 전방 감시 섹터 반각[deg]. 과거 ±30°에서 23° 옆 모서리 빔 오탐 이력 →
-                # 넓힐 때 좁은통로/벽앞회전 오정지 관찰. 유리 등 약반사물 포착엔 넓은 게 유리.
                 'front_sector_deg': 30.0,
             }],
             remappings=tf_remaps,
         ),
 
         # 안전 게이트 (기본 on) — /cmd_vel_raw → cmd_vel_topic
-        # 유리창: pure_pursuit stop_dist(0.60m) + 여기 front_stop_dist(0.50m) 이중 방어.
         Node(
             package='tag_hotspot_nav',
             executable='safety_layer',
@@ -125,7 +109,7 @@ def generate_launch_description():
             }],
         ),
 
-        # 이벤트 사운드 (기본 on) — TF 불요
+        # 이벤트 사운드 (기본 on)
         Node(
             package='tag_hotspot_nav',
             executable='sound_player',
@@ -134,7 +118,7 @@ def generate_launch_description():
             condition=IfCondition(use_sound),
         ),
 
-        # 끼임 감지 (명령 지속 + 휠오돔 무이동 → /stuck) — 사운드 pullup 트리거
+        # 끼임 감지 (명령 지속 + 휠오돔 무이동 → /stuck)
         Node(
             package='tag_hotspot_nav',
             executable='stuck_detector',
@@ -142,17 +126,7 @@ def generate_launch_description():
             output='screen',
         ),
 
-        # 낭떠러지/계단 비상정지 (기본 on) — /livox/lidar 점군, TF 불요
-        # 계단 감지는 젯슨 front depth(/cliff_alert) 담당. 이 브리지가 받아서 정지시킨다.
-        Node(
-            package='tag_hotspot_nav',
-            executable='cliff_stop',
-            name='cliff_stop',
-            output='screen',
-            condition=IfCondition(use_cliff_stop),
-        ),
-
-        # 매핑 중 태그 정렬 (front 후보 → 잠깐 정렬·관측). cmd_vel 은 pure_pursuit 와 동일 토픽
+        # 매핑 중 태그 정렬
         Node(
             package='tag_hotspot_nav',
             executable='tag_centering',
@@ -163,8 +137,7 @@ def generate_launch_description():
             remappings=tf_remaps,
         ),
 
-        # 동적장애물 잔상 제거 + /scan 장애물 마킹(dynamic_clean) — /map+/scan → /map_nav, TF 필요.
-        # cliff 핸들링 off 면 /cliff_alert 를 죽은 토픽으로 리매핑해 keep-out 비활성(오탐 회피).
+        # 동적장애물 잔상 제거
         Node(
             package='tag_hotspot_nav',
             executable='map_cleaner',
@@ -172,10 +145,10 @@ def generate_launch_description():
             output='screen',
             condition=IfCondition(use_map_cleaner),
             parameters=[{'dynamic_clean': dynamic_clean}],
-            remappings=tf_remaps + [('/cliff_alert', cleaner_cliff_topic)],
+            remappings=tf_remaps,
         ),
 
-        # PS4 X버튼 비상정지 — platform/safety_stop(priority 254) + /pause 동시 발행
+        # PS4 X버튼 비상정지
         Node(
             package='tag_hotspot_nav',
             executable='joy_estop',
