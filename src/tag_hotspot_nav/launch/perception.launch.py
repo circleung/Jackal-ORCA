@@ -1,10 +1,11 @@
 """
-perception.launch.py — 젯슨 인식 ↔ 우리 SLAM 융합 (태그 수집).
+perception.launch.py — 젯슨 인식 ↔ 우리 SLAM 융합 (태그 수집 + 클러스터링).
 
 띄우는 것:
   1. base_link → camera_{front,back}_link static TF   (마운트 위치 — ★줄자 실측 보정)
   2. camera_{front,back}_link → ..._color_optical_frame static TF (REP-103 optical 회전, 고정)
   3. tag_collector : apriltag 검출 → solvePnP → map 누적 → /tags_in_map + tag_observations.json
+  4. clustering   : /tags_in_map → DBSCAN → /hotspots + /hotspot_markers
 
 젯슨은 TF 를 일절 발행하지 않으므로 카메라 TF 는 mini PC(여기)에서 발행해야
 apriltag detection(optical frame) → map 변환이 성립한다.
@@ -66,8 +67,8 @@ def generate_launch_description():
     bz = LaunchConfiguration('cam_back_z')
 
     return LaunchDescription([
-        DeclareLaunchArgument('tag_size', default_value='0.14',
-                              description='태그 검은 사각형 변 길이 [m] (흰 여백 제외)'),
+        DeclareLaunchArgument('tag_size', default_value='0.15',
+                              description='태그 검은 사각형 변 길이 [m] (흰 여백 제외, apriltag.yaml 의 size 와 일치)'),
         DeclareLaunchArgument('map_frame', default_value='map',
                               description='태그 누적 기준 프레임. slam 없이 검증 시 base_link 로'),
         DeclareLaunchArgument('cam_front_x', default_value='0.20',
@@ -115,5 +116,19 @@ def generate_launch_description():
                 'cooldown': 10.0,
             }],
             remappings=tf_remaps,
+        ),
+
+        # 5) clustering — 누적 태그 DBSCAN 군집화 → /hotspots (Phase 3)
+        Node(
+            package='tag_hotspot_nav',
+            executable='clustering',
+            name='clustering',
+            output='screen',
+            parameters=[{
+                'eps': 2.0,          # [m] 같은 hotspot으로 묶을 태그 간 최대 거리
+                'min_samples': 2,    # hotspot 성립 최소 태그 수(자기 포함)
+                'cluster_period': 3.0,
+                'map_frame': map_frame,
+            }],
         ),
     ])
