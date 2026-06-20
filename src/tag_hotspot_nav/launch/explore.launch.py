@@ -83,6 +83,7 @@ def generate_launch_description():
                 'cmd_vel_topic': pp_cmd_topic,
                 'linear_speed': linear_speed,
                 'lookahead': 0.7,
+                'max_angular': 0.5,
                 'goal_tolerance': 0.30,
                 'stop_dist': 0.60,
                 'slow_down_dist': 1.10,
