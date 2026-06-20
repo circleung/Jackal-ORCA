@@ -72,6 +72,7 @@ def generate_launch_description():
                 'goal_timeout': 100.0,
                 'no_frontier_limit': 5,
                 'heading_weight': 4.0,
+                'scan_spin_duration': 0.0,
             }],
             remappings=tf_remaps + [('/map', map_topic)],
         ),
