@@ -245,7 +245,7 @@ class HotspotNavigatorNode(Node):
             self.get_logger().warn('로봇 위치 C-space 스냅 실패 — 다음 tick 재시도')
             return False
 
-        path, _cost = planner.plan(pose, goal)
+        path, _cost, _reached = planner.plan(pose, goal)
         if path is None or len(path) < 2:
             self.get_logger().warn(
                 f'hotspot #{self.idx} ({goal[0]:.2f},{goal[1]:.2f}) 경로 없음')

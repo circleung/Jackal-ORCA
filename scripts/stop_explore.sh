@@ -10,7 +10,7 @@ set -u
 echo "── 탐사 스택 정지 (플랫폼 제외) ──"
 for pat in "explore.launch.py" "perception.launch.py" "slam_2d.launch.py" \
            "frontier_explorer" "pure_pursuit" "tag_collector" "tag_centering" \
-           "map_cleaner" "cliff_stop" "stuck_detector" "sound_player" \
+           "map_cleaner" "stuck_detector" "sound_player" \
            "async_slam_toolbox_node" "pointcloud_to_laserscan_node" \
            "livox_ros_driver2_node"; do
   pids=$(pgrep -f "$pat")

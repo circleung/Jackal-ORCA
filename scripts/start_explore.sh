@@ -4,16 +4,10 @@
 #   · reset/go 는 기동 완료 후 별도로 입력.
 #
 # 사용:
-#   start_explore             # 기본 (cliff_stop·map_cleaner on)
-#   start_explore --no-cliff  # cliff 평지 오탐 우회 모드 (계단 보호 없음, 감시 필수)
+#   start_explore             # 탐사 스택 기동
 set -u
 WS="$HOME/colcon_ws"
 EXPLORE_ARGS=""
-
-if [ "${1:-}" = "--no-cliff" ]; then
-  EXPLORE_ARGS="use_cliff_stop:=false use_map_cleaner:=false"
-  echo "⚠ cliff 우회 모드 — 공간에 진짜 계단 일부 있음. 출발방향·주행 감시 필수."
-fi
 
 set +u   # ROS setup.bash 가 미정의 변수(AMENT_TRACE_SETUP_FILES 등)를 참조하므로 잠시 해제
 source /opt/ros/jazzy/setup.bash
@@ -82,7 +76,7 @@ echo -n "  노드 등록·DDS 디스커버리 대기 "
 sleep 13; echo ""
 echo "── 기동된 노드 ──"
 ros2 node list 2>/dev/null | grep -E \
-  "slam_toolbox|frontier_explorer|pure_pursuit|tag_collector|map_cleaner|sound_player|cliff_stop|stuck_detector" | sort
+  "slam_toolbox|frontier_explorer|pure_pursuit|tag_collector|map_cleaner|sound_player|stuck_detector" | sort
 
 cat <<'EOF'
 

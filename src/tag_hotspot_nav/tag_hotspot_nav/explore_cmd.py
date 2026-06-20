@@ -25,7 +25,7 @@ def _send(cmd: str):
     node = Node('explore_cmd_sender')
     pub = node.create_publisher(String, '/explore/command', 10)
 
-    # DDS discovery: 구독자 수가 가변(frontier/pure_pursuit/sound/cliff/tag_centering/
+    # DDS discovery: 구독자 수가 가변(frontier/pure_pursuit/sound/tag_centering/
     # map_cleaner/tag_collector …)이라 매직넘버 대신 count 안정화까지 대기.
     deadline = time.time() + 5.0
     last, stable = -1, 0
@@ -135,4 +135,4 @@ def save():
     if has_mapnav:
         print(f"정리맵(/map_nav) 저장: {'OK' if ok_clean else '실패'} → {base}_clean.pgm/.yaml")
     else:
-        print("정리맵(/map_nav): 스킵 (map_cleaner 미사용 — --no-cliff 등)")
+        print("정리맵(/map_nav): 스킵 (map_cleaner 미사용)")

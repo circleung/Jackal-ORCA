@@ -70,7 +70,7 @@ def main():
         g_raw = world_to_grid(m, f.centroid.x, f.centroid.y)
         g = planner.nearest_walkable(g_raw)
         in_comp = comp[g[1], g[0]] if g else None
-        path, cost = planner.plan((rx, ry), (f.centroid.x, f.centroid.y), truncate_end_cells=8)
+        path, cost, _reached = planner.plan((rx, ry), (f.centroid.x, f.centroid.y), truncate_end_cells=8)
         print(f'frontier size={f.size} centroid=({f.centroid.x:.2f},{f.centroid.y:.2f}) '
               f'goal스냅={g} 로봇컴포넌트내={in_comp} plan={"OK " + str(len(path)) + "wp" if path else "실패"}')
 

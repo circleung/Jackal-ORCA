@@ -4,11 +4,11 @@ sound_player.py — 이벤트 사운드 (mpg123, 출력 sink = JBL Go 4).
 매핑 (2026-06-09 사용자 확정):
   맵핑 시작~유지        → scifi_beeps.mp3  (배경 루프, 탐사 중 / pause 시 정지)
   태그 포착(/tag_new)   → scanner.mp3      (원샷)
-  장애물 앞 OR 계단     → lock_on.mp3      (/obstacle_block | /cliff_alert 상승엣지, 원샷)
+  장애물 앞            → lock_on.mp3      (/obstacle_block 상승엣지, 원샷)
   수동 전환 OR 끼임     → pullup_alarm.mp3 (조이패드 deadman 누름 1회 | /stuck 상승엣지)
 
 입력: /explore/command(String), /tag_new(Int32), /obstacle_block(Bool),
-      /cliff_alert(Bool), /stuck(Bool), joy_topic(Joy, deadman 버튼), /safety/state(String)
+      /stuck(Bool), joy_topic(Joy, deadman 버튼), /safety/state(String)
 """
 from __future__ import annotations
 import os
@@ -55,7 +55,6 @@ class SoundPlayerNode(Node):
 
         self._exploring = False
         self._paused = False
-        self._cliff = False
         self._obstacle = False
         self._stuck = False
         self._deadman_prev = False
@@ -69,7 +68,6 @@ class SoundPlayerNode(Node):
         self.create_subscription(String, '/explore/command', self._on_command, 10)
         self.create_subscription(Int32, '/tag_new', self._on_tag_new, 10)
         self.create_subscription(Bool, '/obstacle_block', self._on_obstacle, 10)
-        self.create_subscription(Bool, '/cliff_alert', self._on_cliff, 10)
         self.create_subscription(Bool, '/stuck', self._on_stuck, 10)
         self.create_subscription(String, '/safety/state', self._on_safety, 10)
         self.create_subscription(Joy, str(self.get_parameter('joy_topic').value),
@@ -82,7 +80,7 @@ class SoundPlayerNode(Node):
         if shutil.which(self._player) is None:
             self.get_logger().error(f'{self._player} 미설치 — 사운드 비활성')
         self.get_logger().info(
-            f'sound_player up: 맵핑=beeps, 태그=scanner, 장애물/계단=lock_on, 수동/끼임=pullup')
+            f'sound_player up: 맵핑=beeps, 태그=scanner, 장애물=lock_on, 수동/끼임=pullup')
 
     def _play(self, key: str) -> None:
         path = self._snd[key]
@@ -145,15 +143,11 @@ class SoundPlayerNode(Node):
         self._obstacle = bool(msg.data)
         self._eval_danger()
 
-    def _on_cliff(self, msg: Bool) -> None:
-        self._cliff = bool(msg.data)
-        self._eval_danger()
-
     def _eval_danger(self) -> None:
-        # 근접물체 OR 계단 = 위험. 처음 생길 때 lock_on 1회, 깜빡임엔 재울림 안 함.
+        # 근접물체 = 위험. 처음 생길 때 lock_on 1회, 깜빡임엔 재울림 안 함.
         # 위험이 danger_rearm 초 이상 깨끗이 사라진 뒤에야 다음 위험에 다시 울림.
         now = self.get_clock().now().nanoseconds * 1e-9
-        danger = self._obstacle or self._cliff
+        danger = self._obstacle
         if danger:
             if self._danger_armed:
                 self._play('lock_on')

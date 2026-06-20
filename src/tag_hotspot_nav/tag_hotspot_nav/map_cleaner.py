@@ -22,7 +22,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPo
 
 from nav_msgs.msg import OccupancyGrid
 from sensor_msgs.msg import LaserScan
-from std_msgs.msg import Bool, String
+from std_msgs.msg import String
 from tf2_ros import Buffer, TransformListener
 
 
@@ -38,10 +38,6 @@ class MapCleanerNode(Node):
         # 동적 업데이트(매 틱 clear+scan마킹). off 면 /map_nav = slam맵 + 계단 keep-out 만(안정).
         # 매 틱 맵이 바뀌면 A* 가 흔들려 stop-start 가 잦아져서 기본 off (사용자 요청 2026-06-09)
         self.declare_parameter('dynamic_clean', False)
-        # 계단 keep-out: /cliff_alert true 면 로봇 전방 박스를 nav 맵에 영구 장애물로 박음
-        self.declare_parameter('cliff_block_min', 0.3)   # [m] 전방 차단 시작
-        self.declare_parameter('cliff_block_max', 2.0)   # [m] 전방 차단 끝 (계단 검출 범위 커버)
-        self.declare_parameter('cliff_block_halfw', 0.6) # [m] 차단 반폭
 
         self.clear_range  = float(self.get_parameter('clear_range').value)
         self.clear_margin = float(self.get_parameter('clear_margin').value)
@@ -57,12 +53,6 @@ class MapCleanerNode(Node):
         # 맵 origin/크기가 커져도 월드 기준이라 유효. → 지나간 영역 잔상도 유지 제거.
         self._cleared = set()       # {(kx, ky)} where kx=round(wx/res)
         self._res_key = 0.05        # 키 양자화 (맵 resolution 과 동일 가정)
-        self._blocked = set()       # 계단 keep-out 영구 장애물 셀 (월드셀 키)
-        self._cliff = False         # /cliff_alert 최신 값
-        self._mark_pending = False  # true 펄스 래치 (4Hz 틱이 짧은 true 놓치지 않게)
-        self.cb_min = float(self.get_parameter('cliff_block_min').value)
-        self.cb_max = float(self.get_parameter('cliff_block_max').value)
-        self.cb_hw = float(self.get_parameter('cliff_block_halfw').value)
 
         map_qos = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
                              history=HistoryPolicy.KEEP_LAST, depth=1,
@@ -71,8 +61,7 @@ class MapCleanerNode(Node):
                               history=HistoryPolicy.KEEP_LAST, depth=5)
         self.create_subscription(OccupancyGrid, '/map', self._on_map, map_qos)
         self.create_subscription(LaserScan, '/scan', self._on_scan, scan_qos)
-        self.create_subscription(Bool, '/cliff_alert', self._on_cliff, 10)
-        # 'reset' 시 영구 clear/keep-out 셋 초기화 (이전 세션 맵핑 잔재 제거)
+        # 'reset' 시 영구 clear 셋 초기화 (이전 세션 맵핑 잔재 제거)
         self.create_subscription(String, '/explore/command', self._on_cmd, 10)
         self.pub = self.create_publisher(OccupancyGrid, '/map_nav', map_qos)
 
@@ -87,19 +76,11 @@ class MapCleanerNode(Node):
     def _on_scan(self, msg):
         self._scan = msg
 
-    def _on_cliff(self, msg):
-        self._cliff = bool(msg.data)
-        if msg.data:
-            self._mark_pending = True   # 짧은 true 도 다음 틱에서 마킹되도록 래치
-
     def _on_cmd(self, msg):
         if msg.data.strip().lower() == 'reset':
-            nb, nc = len(self._blocked), len(self._cleared)
-            self._blocked.clear()
+            nc = len(self._cleared)
             self._cleared.clear()
-            self._mark_pending = False
-            self.get_logger().info(
-                f'reset 수신 — keep-out({nb})·clear({nc}) 셋 초기화')
+            self.get_logger().info(f'reset 수신 — clear({nc}) 셋 초기화')
 
     def _robot_pose(self):
         try:
@@ -183,31 +164,6 @@ class MapCleanerNode(Node):
                 hgy = np.round((hy - oy) / res - 0.5).astype(int)
                 ib = (hgx >= 0) & (hgx < W) & (hgy >= 0) & (hgy < H)
                 grid[hgy[ib], hgx[ib]] = 100
-
-        # 계단 keep-out: /cliff_alert true 펄스(래치) 면 로봇 전방 박스를 영구 장애물로 누적
-        if self._mark_pending:
-            self._mark_pending = False
-            bx = np.arange(self.cb_min, self.cb_max, res)
-            by = np.arange(-self.cb_hw, self.cb_hw + 1e-6, res)
-            BX, BY = np.meshgrid(bx, by)
-            c, s = math.cos(ryaw), math.sin(ryaw)
-            mx = rx + BX * c - BY * s          # base_link 전방 박스 → map
-            my = ry + BX * s + BY * c
-            before = len(self._blocked)
-            for kx, ky in zip(np.round(mx.ravel() / self._res_key).astype(int),
-                              np.round(my.ravel() / self._res_key).astype(int)):
-                self._blocked.add((int(kx), int(ky)))
-            self.get_logger().warn(
-                f'🚧 계단 keep-out 마킹 (전방 {self.cb_min}~{self.cb_max}m) '
-                f'→ 누적 {len(self._blocked)}셀 (+{len(self._blocked)-before})')
-
-        # 누적된 keep-out 셀을 occupied(100) 로 적용 (clear 보다 우선)
-        if self._blocked:
-            bk = np.array(tuple(self._blocked), dtype=np.float64)
-            gxb = np.round((bk[:, 0] * self._res_key - ox) / res - 0.5).astype(int)
-            gyb = np.round((bk[:, 1] * self._res_key - oy) / res - 0.5).astype(int)
-            inb = (gxb >= 0) & (gxb < W) & (gyb >= 0) & (gyb < H)
-            grid[gyb[inb], gxb[inb]] = 100
 
         out = OccupancyGrid()
         out.header = m.header

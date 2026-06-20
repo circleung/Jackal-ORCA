@@ -67,7 +67,7 @@ def generate_launch_description():
     bz = LaunchConfiguration('cam_back_z')
 
     return LaunchDescription([
-        DeclareLaunchArgument('tag_size', default_value='0.15',
+        DeclareLaunchArgument('tag_size', default_value='0.14',
                               description='태그 검은 사각형 변 길이 [m] (흰 여백 제외, apriltag.yaml 의 size 와 일치)'),
         DeclareLaunchArgument('map_frame', default_value='map',
                               description='태그 누적 기준 프레임. slam 없이 검증 시 base_link 로'),

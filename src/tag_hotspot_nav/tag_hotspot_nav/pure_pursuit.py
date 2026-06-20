@@ -54,8 +54,14 @@ class PurePursuitNode(Node):
         # 둘이 같으면 heading_err 가 경계에서 노이즈로 흔들릴 때마다 모드가 매 cycle 토글되어
         # "덜덜덜" 떨림 + 정지-주행 반복이 발생 (좁은 복도 급커브에서 특히 심함).
         self.declare_parameter('rotate_exit_angle', 0.6)       # [rad] 회전모드 해제 임계 (< rotate_in_place_angle)
+        # 방위오차 비례 선속도 감속의 분모. rotate_in_place_angle(=1.0)과 분리해서
+        # 둬야 "주행 중 회전(0.6~1.0rad)" 구간에서 선속도가 과하게(0.4배) 안 깎인다.
+        self.declare_parameter('heading_slow_angle', 1.8)      # [rad] 클수록 회전 중 선속도 유지
         self.declare_parameter('slow_down_dist', 0.8)     # [m] 전방 장애물 감속 시작
-        self.declare_parameter('stop_dist', 0.35)         # [m] 전방 장애물 정지
+        self.declare_parameter('stop_dist', 0.35)         # [m] 전방 장애물 정지 진입
+        # 정지 히스테리시스: stop_dist 에서 멈추고, stop_release_dist 이상 트여야 재출발.
+        # 둘이 같으면 clearance 노이즈로 매 틱 정지↔주행 토글(=떨림/기어감)이 생긴다.
+        self.declare_parameter('stop_release_dist', 0.50) # [m] 정지 해제 임계 (> stop_dist)
         self.declare_parameter('front_sector_deg', 15.0)  # [deg] 전방 감시 섹터 반각 (정지/감속 판정)
         self.declare_parameter('control_rate', 20.0)      # [Hz]
         # 회전 안전 가드: 전방위 최근접 장애물이 가까우면 회전 속도를 줄인다(멈춤 X → 교착 방지).
@@ -77,8 +83,10 @@ class PurePursuitNode(Node):
         self.goal_tolerance = self.get_parameter('goal_tolerance').value
         self.rotate_angle = self.get_parameter('rotate_in_place_angle').value
         self.rotate_exit_angle = self.get_parameter('rotate_exit_angle').value
+        self.heading_slow_angle = float(self.get_parameter('heading_slow_angle').value)
         self.slow_down_dist = self.get_parameter('slow_down_dist').value
         self.stop_dist = self.get_parameter('stop_dist').value
+        self.stop_release_dist = float(self.get_parameter('stop_release_dist').value)
         self.front_sector = math.radians(self.get_parameter('front_sector_deg').value)
         control_rate = self.get_parameter('control_rate').value
         self.rotate_slow_clearance = self.get_parameter('rotate_slow_clearance').value
@@ -111,6 +119,7 @@ class PurePursuitNode(Node):
         self.surround_clearance = float('inf')   # 전방위 최근접 (회전 안전 가드용)
         self._reverse = False     # 현재 후진 추종 중 여부 (히스테리시스 상태)
         self._rotating = False    # 현재 제자리회전 모드 여부 (히스테리시스 상태)
+        self._stopped = False     # 전방 장애물 정지 상태 (히스테리시스)
         self.paused = False       # pause 명령 시 즉시 정지 (경로는 유지)
         self._prev_ang = 0.0      # 각속도 EMA 스무딩용 이전 값
 
@@ -123,6 +132,7 @@ class PurePursuitNode(Node):
         self.path_index = 0
         self._reverse = False     # 새 경로 → 전/후진 상태 초기화
         self._rotating = False    # 새 경로 → 회전모드 상태 초기화
+        self._stopped = False     # 새 경로 → 정지 히스테리시스 리셋
         self._prev_ang = 0.0      # 새 경로 → EMA 리셋
         if self.path:
             self.get_logger().info(f'새 경로 수신: {len(self.path)} waypoints')
@@ -255,7 +265,8 @@ class PurePursuitNode(Node):
             self._rotating = True
 
         if self._rotating:
-            w = math.copysign(self.max_angular * 0.6, heading_err) * self._rot_scale()
+            # 제자리회전 각속도 상향(0.6→0.9배): 너무 느린 회전이 "기어가는" 체감 유발
+            w = math.copysign(self.max_angular * 0.9, heading_err) * self._rot_scale()
             # EMA 를 경로추종과 공유 유지 → 모드 전환 시 각속도 급변(=진동) 제거
             w = self.ang_smooth * w + (1.0 - self.ang_smooth) * self._prev_ang
             self._prev_ang = w
@@ -267,15 +278,23 @@ class PurePursuitNode(Node):
         curvature = 2.0 * ly_eff / (dist * dist) if dist > 1e-6 else 0.0
 
         lin = self.linear_speed   # 크기(부호는 마지막에 direction 으로)
-        # 진행 방향 장애물 감속/정지 (전진=전방, 후진=후방, 최후 방어)
-        if clearance < self.stop_dist:
+        # 진행 방향 장애물 정지 (히스테리시스): stop_dist 에서 멈추고,
+        # stop_release_dist 이상 트여야 재출발 → clearance 노이즈로 인한 정지↔주행 토글 제거
+        if self._stopped:
+            if clearance > self.stop_release_dist:
+                self._stopped = False
+        elif clearance < self.stop_dist:
+            self._stopped = True
+        if self._stopped:
+            self._prev_ang = 0.0      # 재출발 시 옛 각속도로 튀지 않게 EMA 리셋
             self.publish_cmd(0.0, 0.0)
             return
         if clearance < self.slow_down_dist:
             lin *= (clearance - self.stop_dist) / \
                    (self.slow_down_dist - self.stop_dist)
-        # 방위 오차에 비례한 감속 (코너에서 안정)
-        lin *= max(0.3, 1.0 - abs(heading_err) / self.rotate_angle)
+        # 방위 오차에 비례한 감속 (코너에서 안정). 분모를 heading_slow_angle 로 분리해
+        # 주행 중 회전에서 선속도가 과하게 깎이지 않게 함 (하한 0.5).
+        lin *= max(0.5, 1.0 - abs(heading_err) / self.heading_slow_angle)
 
         ang = max(-self.max_angular, min(self.max_angular, lin * curvature))
         ang *= self._rot_scale()    # 주변 좁으면 회전 성분도 감속

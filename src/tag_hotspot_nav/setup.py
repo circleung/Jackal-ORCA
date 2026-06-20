@@ -40,10 +40,8 @@ setup(
             # 안전·사운드 (jackal_mine_detection 에서 2D 스택에 맞게 이관)
             'safety_layer = tag_hotspot_nav.safety_layer:main',
             'sound_player = tag_hotspot_nav.sound_player:main',
-            # 동적장애물 잔상 제거 (계단 감지는 젯슨 depth 로 이관)
+            # 동적장애물 잔상 제거
             'map_cleaner = tag_hotspot_nav.map_cleaner:main',
-            # 젯슨 /cliff_alert → 정지 브리지
-            'cliff_stop = tag_hotspot_nav.cliff_stop:main',
             # 매핑 중 태그 정렬(능동 포착)
             'tag_centering = tag_hotspot_nav.tag_centering:main',
             # 끼임 감지 (명령 지속 + 휠오돔 무이동 → /stuck)

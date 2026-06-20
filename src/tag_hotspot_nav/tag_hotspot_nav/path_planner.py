@@ -126,7 +126,7 @@ class PathPlanner:
                     current = came_from[current]
                     path.append(current)
                 path.reverse()
-                return path, g
+                return path, g, True       # 실제 goal 도달
             if current in closed:
                 continue
             closed.add(current)
@@ -154,6 +154,8 @@ class PathPlanner:
                         (tentative + _octile(neighbor, goal), tentative, neighbor))
 
         # goal 도달 불가 → 컴포넌트 내 goal 최근접 지점까지의 부분 경로
+        # reached=False: 호출측이 "이 frontier 는 못 닿는다"고 알 수 있게 함
+        # (부분경로는 진행용으로 발행하되, 도달해도 성공으로 치지 말 것)
         if best_node != start:
             path = [best_node]
             current = best_node
@@ -161,9 +163,9 @@ class PathPlanner:
                 current = came_from[current]
                 path.append(current)
             path.reverse()
-            return path, g_score[best_node]
+            return path, g_score[best_node], False
 
-        return None, float('inf')
+        return None, float('inf'), False
 
     # ── 공개 API ─────────────────────────────────────────────────
     def plan(self, start_world, goal_world, truncate_end_cells: int = 0):
@@ -180,11 +182,11 @@ class PathPlanner:
         start = self.nearest_walkable(world_to_grid(self.mapdata, *start_world))
         goal = self.nearest_walkable(world_to_grid(self.mapdata, *goal_world))
         if start is None or goal is None:
-            return None, float('inf')
+            return None, float('inf'), False
 
-        cells, cost = self.a_star(start, goal)
+        cells, cost, reached = self.a_star(start, goal)
         if cells is None:
-            return None, float('inf')
+            return None, float('inf'), False
 
         if truncate_end_cells > 0 and len(cells) > truncate_end_cells + 2:
             cells = cells[:-truncate_end_cells]
@@ -193,4 +195,4 @@ class PathPlanner:
         # RDP 스무딩: 3셀(~0.15m) 이내 지그재그 제거 → pure_pursuit 각속도 진동 억제
         if len(world_pts) > 2:
             world_pts = _rdp(world_pts, 3.0 * self.mapdata.info.resolution)
-        return world_pts, cost
+        return world_pts, cost, reached

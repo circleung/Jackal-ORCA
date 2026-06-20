@@ -124,6 +124,8 @@ class FrontierExplorerNode(Node):
         self.paused = True   # 'go' 명령 전까지 대기
         self.final_sweep_done = False   # 종료 전 blacklist 리셋 재확인 1회
         self.current_goal = None        # 현재 추종 중인 frontier 중심 (막힘 시 blacklist 대상)
+        self._goal_partial = False      # 현재 목표가 부분경로(도달 불가)인지
+        self._np_retry_goal = None      # 무진전 1회 재시도한 목표 (재발 시에만 포기)
         # 스캔 회전 / 후진 상태
         self._scanning = False
         self._scan_end_time = None
@@ -178,8 +180,16 @@ class FrontierExplorerNode(Node):
     def goal_reached_callback(self, msg: Bool):
         if msg.data and self.is_navigating:
             self.is_navigating = False
+            self._np_retry_goal = None
             if self.current_goal is not None:
                 self._record_visit(*self.current_goal)
+                # 부분경로(도달 불가) 목표는 끝점 도달=영역 미밝힘 → blacklist 해서
+                # 다음 사이클에 같은 frontier 재선택(반복 루트)을 끊는다.
+                if self._goal_partial:
+                    self.add_to_blacklist(*self.current_goal)
+                    self.get_logger().warn(
+                        f'도달불가 frontier ({self.current_goal[0]:.2f},'
+                        f'{self.current_goal[1]:.2f}) 부분경로 끝 도달 → blacklist')
             if self.scan_spin_duration > 0:
                 self._scanning = True
                 self._scan_end_time = (self.get_clock().now()
@@ -216,6 +226,7 @@ class FrontierExplorerNode(Node):
             self.blacklist = {}
             self.visit_counts = {}
             self.final_sweep_done = False
+            self._np_retry_goal = None
             self.get_logger().info("명령 'reset' → 매핑 처음부터 다시")
         elif cmd == 'pause':
             if self.paused:
@@ -270,6 +281,7 @@ class FrontierExplorerNode(Node):
                     f'목표 타임아웃({self.goal_timeout:.0f}s) → 목표 blacklist 후 재계획')
                 self.is_navigating = False
                 self._np_pos = None
+                self._np_retry_goal = None
                 return
             # 무진전 재계획: 장애물 막힘 등으로 10초간 거의 안 움직이면 즉시 재계획
             pose = self.get_robot_pose()
@@ -281,14 +293,26 @@ class FrontierExplorerNode(Node):
                     self._np_pos = pose
                     self._np_t = tnow
                 elif tnow - self._np_t > self.no_progress_timeout:
-                    # 막힘: 현재 frontier 를 blacklist 에 넣어 다음엔 다른 목표를 고르게 한다.
-                    # (안 그러면 같은 최저비용 frontier 로 동일 경로를 무한 재계획)
-                    if self.current_goal is not None:
-                        self.add_to_blacklist(*self.current_goal)
-                        self.get_logger().warn(
-                            f'무진전({self.no_progress_timeout:.0f}s) → 목표 '
-                            f'({self.current_goal[0]:.2f},{self.current_goal[1]:.2f}) '
-                            'blacklist 후 후진 탈출 → 재탐색')
+                    # 경로 커밋: 첫 무진전이면 같은 목표를 버리지 않고 후진으로 자세만
+                    # 회복한 뒤 동일 목표로 재계획(경로 최대한 유지). 같은 목표에서
+                    # 또 무진전하면 그때 blacklist 해서 다른 경로로 전환한다.
+                    g = self.current_goal
+                    if g is not None:
+                        retried = (self._np_retry_goal is not None and
+                                   math.hypot(g[0] - self._np_retry_goal[0],
+                                              g[1] - self._np_retry_goal[1])
+                                   < self.blacklist_radius)
+                        if retried:
+                            self.add_to_blacklist(*g)
+                            self._np_retry_goal = None
+                            self.get_logger().warn(
+                                f'무진전 재발 → 목표 ({g[0]:.2f},{g[1]:.2f}) '
+                                'blacklist 후 다른 경로로 전환')
+                        else:
+                            self._np_retry_goal = g
+                            self.get_logger().warn(
+                                f'무진전({self.no_progress_timeout:.0f}s) → 후진 후 '
+                                f'같은 목표 ({g[0]:.2f},{g[1]:.2f}) 재계획(경로 유지 시도)')
                     else:
                         self.get_logger().warn(
                             f'무진전({self.no_progress_timeout:.0f}s, 막힘 추정) → 후진 후 재계획')
@@ -355,9 +379,10 @@ class FrontierExplorerNode(Node):
 
         best_path, best_cost = None, float('inf')
         best_frontier = None
+        best_reached = False   # 선택된 목표가 실제 goal 도달 가능 경로인지(부분경로 아님)
         cycle_blacklist = []   # 이번 사이클에서 실패한 후보 (확정 전 임시 보관)
         for f in candidates:
-            path, cost = planner.plan(
+            path, cost, reached = planner.plan(
                 robot_pose, (f.centroid.x, f.centroid.y),
                 truncate_end_cells=self.truncate_end_cells)
             if path is None:
@@ -373,7 +398,7 @@ class FrontierExplorerNode(Node):
             cost *= self._heading_factor(
                 f.centroid.x, f.centroid.y, robot_pose[0], robot_pose[1], ryaw)
             if cost < best_cost:
-                best_path, best_cost, best_frontier = path, cost, f
+                best_path, best_cost, best_frontier, best_reached = path, cost, f, reached
 
         # 상위 N개 전멸 시 나머지 frontier 도 순서대로 평가 (첫 성공 채택).
         # 좁은 C-space 포켓에선 가까운 대형 frontier 는 진행 불가여도
@@ -381,7 +406,7 @@ class FrontierExplorerNode(Node):
         # 갇혔을 때 동쪽 frontier 만 0.85m 진행 가능했는데 상위 8개에 못 듦)
         if best_path is None:
             for f in ranked[self.top_n_astar:]:
-                path, cost = planner.plan(
+                path, cost, reached = planner.plan(
                     robot_pose, (f.centroid.x, f.centroid.y),
                     truncate_end_cells=self.truncate_end_cells)
                 if path is None:
@@ -389,7 +414,7 @@ class FrontierExplorerNode(Node):
                 if math.hypot(path[-1].x - robot_pose[0],
                               path[-1].y - robot_pose[1]) < 0.3:
                     continue
-                best_path, best_frontier = path, f
+                best_path, best_frontier, best_reached = path, f, reached
                 break
 
         if best_path is None:
@@ -422,6 +447,15 @@ class FrontierExplorerNode(Node):
         # 막힘(goal_timeout·무진전) 시 blacklist 대상이 될 현재 목표 기록.
         # (이게 None 이면 blacklist 분기가 죽어 같은 frontier 를 무한 재선택함)
         self.current_goal = (best_frontier.centroid.x, best_frontier.centroid.y)
+        # 부분경로(도달 불가) 목표는 끝점에 "도달"해도 그 영역이 안 밝혀지므로,
+        # 도달 시 성공으로 치지 말고 blacklist 해야 같은 frontier 무한 재선택을 끊는다.
+        self._goal_partial = not best_reached
+        # 재시도 추적: 다른 목표로 넘어갔으면 무진전 재시도 상태 초기화
+        if (self._np_retry_goal is not None and
+                math.hypot(self.current_goal[0] - self._np_retry_goal[0],
+                           self.current_goal[1] - self._np_retry_goal[1])
+                >= self.blacklist_radius):
+            self._np_retry_goal = None
         self.goal_start_time = self.get_clock().now()
         self.get_logger().info(
             f'frontier 목표 ({best_frontier.centroid.x:.2f}, '

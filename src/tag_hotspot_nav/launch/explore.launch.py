@@ -45,8 +45,8 @@ def generate_launch_description():
             parameters=[{
                 'robot_radius': 0.22,
                 'goal_timeout': 60.0,
-                'no_progress_timeout': 8.0,   # 8s 막힘 → 즉시 재계획 (기존 30s)
-                'no_frontier_limit': 3,
+                'no_progress_timeout': 12.0,  # 막힘 인내심 ↑ (경로 유지). 첫 무진전은 같은 목표 재시도
+                'no_frontier_limit': 6,       # 종료/스윕 판정 완화 (blacklist 잦은 리셋 방지)
                 'heading_weight': 4.0,         # DFS: 현재 방향 4배 우선
                 'scan_spin_duration': 0.0,     # 탐사 중 스핀 off
                 'cmd_vel_topic': cmd_vel_topic,
@@ -64,11 +64,13 @@ def generate_launch_description():
             parameters=[{
                 'cmd_vel_topic': pp_cmd_topic,
                 'linear_speed': linear_speed,
-                'lookahead': 1.2,             # 1.0→1.2: 더 멀리 보기 → 코너 진입 부드럽게
+                'lookahead': 0.9,             # 1.2→0.9: 코너 타겟 점프 완화(진동·과회전 억제)
                 'max_angular': 0.6,
                 'goal_tolerance': 0.30,
-                'stop_dist': 0.50,
+                'stop_dist': 0.40,            # 정지 진입(0.50→0.40, range_min 0.20이라 유효)
+                'stop_release_dist': 0.55,    # 정지 해제(히스테리시스 → 정지-주행 토글 제거)
                 'slow_down_dist': 0.70,       # 0.70m까지 안 감속 → 복도 빠르게 통과
+                'heading_slow_angle': 1.8,    # 회전 중 선속도 유지(과감속 방지)
                 'front_sector_deg': 25.0,     # 25°로 좁혀 복도 옆벽 오감지 제거
                 'rotate_slow_clearance': 0.30, # 복도벽(~0.5m)이 회전 감속 유발 방지
                 'rotate_stop_clearance': 0.20, # 극단적 근접 시만 최저속
