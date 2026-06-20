@@ -64,12 +64,12 @@ def generate_launch_description():
             parameters=[{
                 'cmd_vel_topic': pp_cmd_topic,
                 'linear_speed': linear_speed,
-                'lookahead': 1.0,             # 1.0m → 진동 없는 부드러운 추종
-                'max_angular': 0.6,           # 회전 부드럽게
+                'lookahead': 1.0,
+                'max_angular': 0.6,
                 'goal_tolerance': 0.30,
-                'stop_dist': 0.55,            # 0.55m → TV 다리 등 얇은 장애물
-                'slow_down_dist': 1.10,
-                'front_sector_deg': 35.0,     # ±35° 전방 감시
+                'stop_dist': 0.50,
+                'slow_down_dist': 0.70,       # 0.70m까지 안 감속 → 복도 빠르게 통과
+                'front_sector_deg': 25.0,     # 25°로 좁혀 복도 옆벽 오감지 제거
             }],
             remappings=tf_remaps,
         ),
