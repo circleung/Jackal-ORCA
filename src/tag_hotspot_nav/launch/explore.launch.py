@@ -7,15 +7,14 @@ explore.launch.py — 자율 탐사 스택 (frontier_explorer + pure_pursuit [+ 
 
 사용:
   ros2 launch tag_hotspot_nav explore.launch.py
-  ros2 launch tag_hotspot_nav explore.launch.py linear_speed:=0.2     # 조심 모드
+  ros2 launch tag_hotspot_nav explore.launch.py linear_speed:=0.3     # 빠른 모드
   ros2 launch tag_hotspot_nav explore.launch.py cmd_vel_topic:=/dry_run/cmd_vel  # 바퀴 안 굴림
-  ros2 launch tag_hotspot_nav explore.launch.py use_safety:=true      # 안전 게이트 삽입
+  ros2 launch tag_hotspot_nav explore.launch.py use_safety:=false     # 안전 게이트 끄기
   ros2 launch tag_hotspot_nav explore.launch.py use_sound:=false      # 사운드 끄기
 
-⚠ use_safety:=true 시 체인이 pure_pursuit→/cmd_vel_raw→safety_layer→cmd_vel 로 바뀐다.
-   safety_layer 의 정지거리(front/back_stop_dist)는 base_link 기준 PLACEHOLDER 라
-   실기에서 한 번 검증/튜닝하기 전엔 기본 off. 검증은 들어올린 상태에서 /scan 앞에
-   손 갖다 대며 block 카운터(/safety/state) 증가 확인.
+⚠ use_safety:=true(기본): 체인이 pure_pursuit→/cmd_vel_raw→safety_layer→cmd_vel.
+   정지거리 front/back_stop_dist=0.50m (base_link 기준). pure_pursuit stop_dist=0.60m
+   와 이중 보호. 유리창 근접정지의 2차 안전망.
 """
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -56,10 +55,10 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('cmd_vel_topic', default_value='/j100_0915/cmd_vel',
                               description='최종 주행 명령 토픽 (twist_mux 입력)'),
-        DeclareLaunchArgument('linear_speed', default_value='0.3',
-                              description='최대 선속도 [m/s]'),
-        DeclareLaunchArgument('use_safety', default_value='false',
-                              description='cmd_vel 안전 게이트(safety_layer) 삽입 — 실기 검증 후 on 권장'),
+        DeclareLaunchArgument('linear_speed', default_value='0.2',
+                              description='최대 선속도 [m/s] — 유리창 대비 SLAM 선행 시간 확보'),
+        DeclareLaunchArgument('use_safety', default_value='true',
+                              description='cmd_vel 안전 게이트(safety_layer) 삽입 — 유리창 근접정지 2차 보호'),
         DeclareLaunchArgument('use_sound', default_value='true',
                               description='이벤트 사운드(sound_player) 실행'),
         DeclareLaunchArgument('use_map_cleaner', default_value='true',
@@ -107,7 +106,8 @@ def generate_launch_description():
             remappings=tf_remaps,
         ),
 
-        # 안전 게이트 (옵트인) — /cmd_vel_raw → cmd_vel_topic
+        # 안전 게이트 (기본 on) — /cmd_vel_raw → cmd_vel_topic
+        # 유리창: pure_pursuit stop_dist(0.60m) + 여기 front_stop_dist(0.50m) 이중 방어.
         Node(
             package='tag_hotspot_nav',
             executable='safety_layer',
@@ -119,6 +119,9 @@ def generate_launch_description():
                 'cmd_vel_topic': cmd_vel_topic,
                 'scan_topic': '/scan',
                 'max_linear': linear_speed,
+                'front_stop_dist': 0.50,
+                'back_stop_dist': 0.50,
+                'swept_half_width': 0.235,
             }],
         ),
 
