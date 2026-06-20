@@ -174,4 +174,12 @@ def generate_launch_description():
             parameters=[{'dynamic_clean': dynamic_clean}],
             remappings=tf_remaps + [('/cliff_alert', cleaner_cliff_topic)],
         ),
+
+        # PS4 X버튼 비상정지 — platform/safety_stop(priority 254) + /pause 동시 발행
+        Node(
+            package='tag_hotspot_nav',
+            executable='joy_estop',
+            name='joy_estop',
+            output='screen',
+        ),
     ])
