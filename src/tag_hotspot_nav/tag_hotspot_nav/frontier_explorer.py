@@ -20,8 +20,9 @@ import math
 
 import rclpy
 from rclpy.node import Node
+from rclpy.duration import Duration
 
-from geometry_msgs.msg import PoseStamped, Quaternion
+from geometry_msgs.msg import PoseStamped, Quaternion, TwistStamped
 from nav_msgs.msg import GridCells, OccupancyGrid, Path
 from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
@@ -51,6 +52,13 @@ class FrontierExplorerNode(Node):
         # (A) DFS 식 선택: 현재 진행방향과 어긋난 frontier 의 비용 가중 (0=순수 최근접,
         #     클수록 한 방향을 끝까지 파고듦). 정반대 방향이면 비용 ×(1+heading_weight).
         self.declare_parameter('heading_weight', 1.0)
+        # goal 도달 후 AprilTag 스캔 회전 (front+back 카메라 합산 360° 커버)
+        self.declare_parameter('scan_spin_duration', 7.0)   # [s] 7s × 0.5rad/s ≈ 200°
+        self.declare_parameter('scan_spin_angular', 0.5)    # [rad/s]
+        self.declare_parameter('cmd_vel_topic', '/j100_0915/cmd_vel')
+        # 좁은 공간 탈출 후진
+        self.declare_parameter('backup_duration', 2.5)      # [s]
+        self.declare_parameter('backup_speed', -0.2)        # [m/s]
         self.declare_parameter('blacklist_radius', 0.6)     # [m] 실패 frontier 회피 반경
         self.declare_parameter('blacklist_ttl', 60.0)       # [s] blacklist 유효 시간
         self.declare_parameter('blacklist_max_strikes', 3)  # 이 횟수 실패 시 영구 차단
@@ -65,6 +73,10 @@ class FrontierExplorerNode(Node):
         self.no_progress_timeout = self.get_parameter('no_progress_timeout').value
         self.no_progress_dist = self.get_parameter('no_progress_dist').value
         self.heading_weight = self.get_parameter('heading_weight').value
+        self.scan_spin_duration = self.get_parameter('scan_spin_duration').value
+        self.scan_spin_angular = self.get_parameter('scan_spin_angular').value
+        self.backup_duration = self.get_parameter('backup_duration').value
+        self.backup_speed = self.get_parameter('backup_speed').value
         self._np_pos = None      # 무진전 감지: 마지막 진전 위치
         self._np_t = None
         self.blacklist_radius = self.get_parameter('blacklist_radius').value
@@ -82,6 +94,8 @@ class FrontierExplorerNode(Node):
         self.finish_pub = self.create_publisher(Bool, '/finish_exploration', 10)
         self.centroids_pub = self.create_publisher(MarkerArray, '/frontier_centroids', 10)
         self.cells_pub = self.create_publisher(GridCells, '/frontier_cells', 10)
+        _cv_topic = self.get_parameter('cmd_vel_topic').value
+        self._cmd_pub = self.create_publisher(TwistStamped, _cv_topic, 10)
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -103,18 +117,52 @@ class FrontierExplorerNode(Node):
         self.paused = True   # 'go' 명령 전까지 대기
         self.final_sweep_done = False   # 종료 전 blacklist 리셋 재확인 1회
         self.current_goal = None        # 현재 추종 중인 frontier 중심 (막힘 시 blacklist 대상)
+        # 스캔 회전 / 후진 상태
+        self._scanning = False
+        self._scan_end_time = None
+        self._backing_up = False
+        self._backup_end_time = None
 
         self.timer = self.create_timer(1.0, self.explore_step)
+        self.create_timer(0.1, self._motion_cb)
         self.get_logger().info("frontier_explorer 대기 중 — 터미널에서 'go' 입력으로 시작")
 
     # ── 콜백 ───────────────────────────────────────────────────
     def map_callback(self, msg: OccupancyGrid):
         self.mapdata = msg
 
+    def _motion_cb(self):
+        """스캔 회전 / 후진 탈출 cmd_vel 발행 (0.1s 주기)."""
+        now = self.get_clock().now()
+        twist = TwistStamped()
+        twist.header.stamp = now.to_msg()
+        twist.header.frame_id = 'base_link'
+        if self._scanning:
+            if self._scan_end_time and now < self._scan_end_time:
+                twist.twist.angular.z = self.scan_spin_angular
+            else:
+                self._scanning = False
+                self.get_logger().info('스캔 회전 완료 → 다음 frontier 탐색')
+            self._cmd_pub.publish(twist)
+        elif self._backing_up:
+            if self._backup_end_time and now < self._backup_end_time:
+                twist.twist.linear.x = self.backup_speed
+            else:
+                self._backing_up = False
+                self.get_logger().info('후진 탈출 완료 → 재계획')
+            self._cmd_pub.publish(twist)
+
     def goal_reached_callback(self, msg: Bool):
         if msg.data and self.is_navigating:
-            self.get_logger().info('목표 도달 → 다음 frontier 탐색')
             self.is_navigating = False
+            if self.scan_spin_duration > 0:
+                self._scanning = True
+                self._scan_end_time = (self.get_clock().now()
+                                       + Duration(seconds=self.scan_spin_duration))
+                self.get_logger().info(
+                    f'목표 도달 → {self.scan_spin_duration:.0f}s 스캔 회전 (AprilTag 탐색)')
+            else:
+                self.get_logger().info('목표 도달 → 다음 frontier 탐색')
             self.current_goal = None   # 정상 도달은 blacklist 안 함
 
     def command_callback(self, msg: String):
@@ -180,6 +228,8 @@ class FrontierExplorerNode(Node):
 
     # ── 메인 루프 ──────────────────────────────────────────────
     def explore_step(self):
+        if self._scanning or self._backing_up:
+            return
         if self.paused or self.finished or self.mapdata is None:
             return
 
@@ -212,10 +262,15 @@ class FrontierExplorerNode(Node):
                         self.get_logger().warn(
                             f'무진전({self.no_progress_timeout:.0f}s) → 목표 '
                             f'({self.current_goal[0]:.2f},{self.current_goal[1]:.2f}) '
-                            'blacklist 후 다른 frontier 재탐색')
+                            'blacklist 후 후진 탈출 → 재탐색')
                     else:
                         self.get_logger().warn(
-                            f'무진전({self.no_progress_timeout:.0f}s, 막힘 추정) → 재계획')
+                            f'무진전({self.no_progress_timeout:.0f}s, 막힘 추정) → 후진 후 재계획')
+                    # 좁은 공간 탈출: 후진
+                    if self.backup_duration > 0:
+                        self._backing_up = True
+                        self._backup_end_time = (self.get_clock().now()
+                                                 + Duration(seconds=self.backup_duration))
                     self.is_navigating = False
                     self._np_pos = None
             return
