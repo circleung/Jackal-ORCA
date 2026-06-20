@@ -49,7 +49,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('cmd_vel_topic', default_value='/j100_0915/cmd_vel',
                               description='최종 주행 명령 토픽 (twist_mux 입력)'),
-        DeclareLaunchArgument('linear_speed', default_value='0.2',
+        DeclareLaunchArgument('linear_speed', default_value='0.3',
                               description='최대 선속도 [m/s] — 유리창 대비 SLAM 선행 시간 확보'),
         DeclareLaunchArgument('use_safety', default_value='true',
                               description='cmd_vel 안전 게이트(safety_layer) 삽입 — 유리창 근접정지 2차 보호'),
@@ -82,7 +82,7 @@ def generate_launch_description():
             parameters=[{
                 'cmd_vel_topic': pp_cmd_topic,
                 'linear_speed': linear_speed,
-                'lookahead': 0.4,
+                'lookahead': 0.7,
                 'goal_tolerance': 0.30,
                 'stop_dist': 0.60,
                 'slow_down_dist': 1.10,
