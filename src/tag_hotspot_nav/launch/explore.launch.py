@@ -64,12 +64,18 @@ def generate_launch_description():
             parameters=[{
                 'cmd_vel_topic': pp_cmd_topic,
                 'linear_speed': linear_speed,
-                'lookahead': 1.0,
+                'lookahead': 1.2,             # 1.0→1.2: 더 멀리 보기 → 코너 진입 부드럽게
                 'max_angular': 0.6,
                 'goal_tolerance': 0.30,
                 'stop_dist': 0.50,
                 'slow_down_dist': 0.70,       # 0.70m까지 안 감속 → 복도 빠르게 통과
                 'front_sector_deg': 25.0,     # 25°로 좁혀 복도 옆벽 오감지 제거
+                'rotate_slow_clearance': 0.30, # 복도벽(~0.5m)이 회전 감속 유발 방지
+                'rotate_stop_clearance': 0.20, # 극단적 근접 시만 최저속
+                'rotate_min_scale': 0.50,      # 최저 회전 50% (기존 25% → 느림 해결)
+                'ang_smooth': 0.45,            # 각속도 EMA → 웨이포인트 전환 시 진동 억제
+                'rotate_in_place_angle': 1.0,  # 제자리회전 진입 임계
+                'rotate_exit_angle': 0.6,      # 해제 임계(히스테리시스) → 경계 떨림/정지-주행 반복 제거
             }],
             remappings=tf_remaps,
         ),
@@ -85,8 +91,8 @@ def generate_launch_description():
                 'cmd_vel_topic': cmd_vel_topic,
                 'scan_topic': '/scan',
                 'max_linear': linear_speed,
-                'front_stop_dist': 0.50,
-                'back_stop_dist': 0.50,
+                'front_stop_dist': 0.65,   # TV다리 등 얇은 장애물 대비 여유 확보
+                'back_stop_dist': 0.40,
                 'swept_half_width': 0.235,
             }],
         ),

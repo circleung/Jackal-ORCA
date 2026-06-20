@@ -21,7 +21,7 @@ class JoyEstop(Node):
             Bool, '/j100_0915/platform/safety_stop', latched)
         self._pub_pause = self.create_publisher(Bool, '/j100_0915/pause', 10)
 
-        self.create_subscription(Joy, '/j100_0915/joy', self._joy_cb, 10)
+        self.create_subscription(Joy, '/j100_0915/joy_teleop/joy', self._joy_cb, 10)
         self.get_logger().info('joy_estop 준비 — X버튼(인덱스0)으로 비상정지/재개')
 
     def _joy_cb(self, msg: Joy):

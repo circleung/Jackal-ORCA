@@ -50,6 +50,10 @@ class PurePursuitNode(Node):
         self.declare_parameter('lookahead', 0.4)          # [m]
         self.declare_parameter('goal_tolerance', 0.15)    # [m]
         self.declare_parameter('rotate_in_place_angle', 1.0)   # [rad] 이 이상 틀어지면 제자리 회전
+        # 회전모드 진입/해제 히스테리시스: 진입(rotate_in_place_angle) > 해제(rotate_exit_angle).
+        # 둘이 같으면 heading_err 가 경계에서 노이즈로 흔들릴 때마다 모드가 매 cycle 토글되어
+        # "덜덜덜" 떨림 + 정지-주행 반복이 발생 (좁은 복도 급커브에서 특히 심함).
+        self.declare_parameter('rotate_exit_angle', 0.6)       # [rad] 회전모드 해제 임계 (< rotate_in_place_angle)
         self.declare_parameter('slow_down_dist', 0.8)     # [m] 전방 장애물 감속 시작
         self.declare_parameter('stop_dist', 0.35)         # [m] 전방 장애물 정지
         self.declare_parameter('front_sector_deg', 15.0)  # [deg] 전방 감시 섹터 반각 (정지/감속 판정)
@@ -57,12 +61,14 @@ class PurePursuitNode(Node):
         # 회전 안전 가드: 전방위 최근접 장애물이 가까우면 회전 속도를 줄인다(멈춤 X → 교착 방지).
         # 차체가 회전 시 모서리로 주변을 쓸기 때문. ⚠ /scan range_min 아래는 라이다 사각.
         # range_min 0.20 으로 차체모서리(~0.33m) 권역까지 보이므로 임계를 그에 맞춤.
-        self.declare_parameter('rotate_slow_clearance', 0.55)  # [m] 이 아래부터 회전 감속
-        self.declare_parameter('rotate_stop_clearance', 0.40)  # [m] 이 이하면 최저속 회전(차체모서리 근접)
-        self.declare_parameter('rotate_min_scale', 0.25)       # 회전 최저 속도 배율(0 아님)
+        self.declare_parameter('rotate_slow_clearance', 0.30)  # [m] 이 아래부터 회전 감속 (복도벽 0.5m 에서는 풀속)
+        self.declare_parameter('rotate_stop_clearance', 0.20)  # [m] 이 이하면 최저속 회전(차체모서리 근접)
+        self.declare_parameter('rotate_min_scale', 0.50)       # 회전 최저 속도 배율 — 최저 50%로 상향
         # 후진 추종: 목표가 뒤쪽이면 제자리 180° 회전 대신 후진(움직임 제한 상황에 효율적).
         self.declare_parameter('allow_reverse', True)          # 후진 허용 (False=항상 전진)
         self.declare_parameter('reverse_hysteresis', 0.3)      # [rad] 전/후진 전환 떨림 억제 여유
+        # 각속도 EMA 스무딩: 웨이포인트 전환 시 각속도 급변 → 진동 억제
+        self.declare_parameter('ang_smooth', 0.45)             # EMA alpha (낮을수록 강한 스무딩)
 
         self.cmd_vel_topic = self.get_parameter('cmd_vel_topic').value
         self.linear_speed = self.get_parameter('linear_speed').value
@@ -70,6 +76,7 @@ class PurePursuitNode(Node):
         self.lookahead = self.get_parameter('lookahead').value
         self.goal_tolerance = self.get_parameter('goal_tolerance').value
         self.rotate_angle = self.get_parameter('rotate_in_place_angle').value
+        self.rotate_exit_angle = self.get_parameter('rotate_exit_angle').value
         self.slow_down_dist = self.get_parameter('slow_down_dist').value
         self.stop_dist = self.get_parameter('stop_dist').value
         self.front_sector = math.radians(self.get_parameter('front_sector_deg').value)
@@ -79,6 +86,7 @@ class PurePursuitNode(Node):
         self.rotate_min_scale = self.get_parameter('rotate_min_scale').value
         self.allow_reverse = self.get_parameter('allow_reverse').value
         self.reverse_hysteresis = self.get_parameter('reverse_hysteresis').value
+        self.ang_smooth = float(self.get_parameter('ang_smooth').value)
 
         # ── 입출력 ──────────────────────────────────────────────
         self.path_sub = self.create_subscription(Path, '/plan', self.path_callback, 10)
@@ -102,7 +110,9 @@ class PurePursuitNode(Node):
         self.rear_clearance = float('inf')       # 후방 ±15° 최근접 (후진 정지용)
         self.surround_clearance = float('inf')   # 전방위 최근접 (회전 안전 가드용)
         self._reverse = False     # 현재 후진 추종 중 여부 (히스테리시스 상태)
+        self._rotating = False    # 현재 제자리회전 모드 여부 (히스테리시스 상태)
         self.paused = False       # pause 명령 시 즉시 정지 (경로는 유지)
+        self._prev_ang = 0.0      # 각속도 EMA 스무딩용 이전 값
 
         self.timer = self.create_timer(1.0 / control_rate, self.control_loop)
         self.get_logger().info(f'pure_pursuit 시작 → {self.cmd_vel_topic}')
@@ -112,6 +122,8 @@ class PurePursuitNode(Node):
         self.path = [(p.pose.position.x, p.pose.position.y) for p in msg.poses]
         self.path_index = 0
         self._reverse = False     # 새 경로 → 전/후진 상태 초기화
+        self._rotating = False    # 새 경로 → 회전모드 상태 초기화
+        self._prev_ang = 0.0      # 새 경로 → EMA 리셋
         if self.path:
             self.get_logger().info(f'새 경로 수신: {len(self.path)} waypoints')
         else:
@@ -234,8 +246,19 @@ class PurePursuitNode(Node):
 
         # 5) 방위 오차 크면 제자리 회전 (스키드스티어 활용)
         #    주변이 좁으면 회전 속도를 줄여 차체 모서리 충돌 위험 완화
-        if abs(heading_err) > self.rotate_angle:
+        #    히스테리시스: heading_err 가 rotate_angle 경계에서 노이즈로 흔들려도
+        #    rotate_exit_angle 까지 내려가야 해제 → 매 cycle 모드 토글(떨림) 방지
+        if self._rotating:
+            if abs(heading_err) < self.rotate_exit_angle:
+                self._rotating = False
+        elif abs(heading_err) > self.rotate_angle:
+            self._rotating = True
+
+        if self._rotating:
             w = math.copysign(self.max_angular * 0.6, heading_err) * self._rot_scale()
+            # EMA 를 경로추종과 공유 유지 → 모드 전환 시 각속도 급변(=진동) 제거
+            w = self.ang_smooth * w + (1.0 - self.ang_smooth) * self._prev_ang
+            self._prev_ang = w
             self.publish_cmd(0.0, w)
             return
 
@@ -256,6 +279,9 @@ class PurePursuitNode(Node):
 
         ang = max(-self.max_angular, min(self.max_angular, lin * curvature))
         ang *= self._rot_scale()    # 주변 좁으면 회전 성분도 감속
+        # EMA 스무딩: 웨이포인트 전환 시 각속도 급변 → 진동 억제
+        ang = self.ang_smooth * ang + (1.0 - self.ang_smooth) * self._prev_ang
+        self._prev_ang = ang
         self.publish_cmd(lin * direction, ang)
 
     # ── 출력 ───────────────────────────────────────────────────

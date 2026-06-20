@@ -62,6 +62,11 @@ class FrontierExplorerNode(Node):
         self.declare_parameter('blacklist_radius', 0.6)     # [m] 실패 frontier 회피 반경
         self.declare_parameter('blacklist_ttl', 60.0)       # [s] blacklist 유효 시간
         self.declare_parameter('blacklist_max_strikes', 3)  # 이 횟수 실패 시 영구 차단
+        # 같은 자리(blacklist_radius 내) 목표에 "성공적으로" 도달한 횟수 제한.
+        # 가구 등 고정 장애물에 가려진 포켓은 도달해도 못 밝혀져 매번 새 frontier로
+        # 재등장 → 정상 도달은 blacklist 안 됨(166행) → 무한 재방문. 가구는 안 움직이므로
+        # 같은 자리를 revisit_limit 회 넘게 갔으면 더 가도 소용없다고 보고 영구 차단.
+        self.declare_parameter('revisit_limit', 2)
 
         self.robot_radius = self.get_parameter('robot_radius').value
         self.min_frontier_size = self.get_parameter('min_frontier_size').value
@@ -82,6 +87,7 @@ class FrontierExplorerNode(Node):
         self.blacklist_radius = self.get_parameter('blacklist_radius').value
         self.blacklist_ttl = self.get_parameter('blacklist_ttl').value
         self.blacklist_max_strikes = self.get_parameter('blacklist_max_strikes').value
+        self.revisit_limit = self.get_parameter('revisit_limit').value
 
         # ── 입출력 ──────────────────────────────────────────────
         self.map_sub = self.create_subscription(OccupancyGrid, '/map', self.map_callback, 10)
@@ -113,6 +119,7 @@ class FrontierExplorerNode(Node):
         # TTL 안에는 회피, TTL 지나면 재시도 자격 (도달 직후 일시 정체로
         # 영구 차단되는 문제 방지). max_strikes 누적 시에만 영구 차단.
         self.blacklist = {}
+        self.visit_counts = {}   # {(x, y): 성공 도달 횟수} — revisit_limit 판정용
         self.finished = False
         self.paused = True   # 'go' 명령 전까지 대기
         self.final_sweep_done = False   # 종료 전 blacklist 리셋 재확인 1회
@@ -152,9 +159,27 @@ class FrontierExplorerNode(Node):
                 self.get_logger().info('후진 탈출 완료 → 재계획')
             self._cmd_pub.publish(twist)
 
+    def _record_visit(self, cx: float, cy: float):
+        """frontier 목표 성공 도달 기록. 같은 자리(blacklist_radius 내) revisit_limit
+        회 넘게 도달했는데도 frontier 가 계속 재등장하면 = 가구 등 고정 장애물로
+        영영 못 밝히는 자리 → 더 가봐도 소용없으니 영구 차단(blacklist max_strikes)."""
+        for (x, y), cnt in list(self.visit_counts.items()):
+            if math.hypot(cx - x, cy - y) < self.blacklist_radius:
+                cnt += 1
+                self.visit_counts[(x, y)] = cnt
+                if cnt >= self.revisit_limit:
+                    self.blacklist[(x, y)] = [self.now_sec(), self.blacklist_max_strikes]
+                    self.get_logger().warn(
+                        f'같은 자리 ({x:.2f},{y:.2f}) {cnt}회 도달해도 새 영역 안 밝혀짐 '
+                        '→ 고정 장애물(가구 등)로 판단, 영구 차단')
+                return
+        self.visit_counts[(cx, cy)] = 1
+
     def goal_reached_callback(self, msg: Bool):
         if msg.data and self.is_navigating:
             self.is_navigating = False
+            if self.current_goal is not None:
+                self._record_visit(*self.current_goal)
             if self.scan_spin_duration > 0:
                 self._scanning = True
                 self._scan_end_time = (self.get_clock().now()
@@ -189,6 +214,7 @@ class FrontierExplorerNode(Node):
             self.no_frontiers_count = 0
             self.all_failed_count = 0
             self.blacklist = {}
+            self.visit_counts = {}
             self.final_sweep_done = False
             self.get_logger().info("명령 'reset' → 매핑 처음부터 다시")
         elif cmd == 'pause':

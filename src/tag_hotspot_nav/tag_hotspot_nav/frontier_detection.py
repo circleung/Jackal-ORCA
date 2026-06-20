@@ -24,7 +24,7 @@ from tag_hotspot_nav.grid_utils import (
     is_cell_in_bounds,
 )
 
-MIN_FRONTIER_SIZE = 8  # 셀 수가 이보다 작은 frontier 는 노이즈로 무시
+MIN_FRONTIER_SIZE = 50  # 셀 수가 이보다 작은 frontier 는 노이즈로 무시
 
 
 @dataclass

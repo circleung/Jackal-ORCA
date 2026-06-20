@@ -39,6 +39,29 @@ def _octile(a, b):
     return (dx + dy) + (math.sqrt(2) - 2) * min(dx, dy)
 
 
+def _rdp(pts, eps):
+    """Ramer-Douglas-Peucker 경로 단순화: 직선에서 eps(m) 이내 점 제거.
+
+    A* 경로의 미세 지그재그를 제거해 pure_pursuit 각속도 진동을 억제한다.
+    """
+    if len(pts) < 3:
+        return pts
+    x0, y0 = pts[0].x, pts[0].y
+    x1, y1 = pts[-1].x, pts[-1].y
+    dx, dy = x1 - x0, y1 - y0
+    line_len = math.hypot(dx, dy)
+    if line_len < 1e-9:
+        dists = [math.hypot(p.x - x0, p.y - y0) for p in pts[1:-1]]
+    else:
+        dists = [abs(dx * (y0 - p.y) - (x0 - p.x) * dy) / line_len
+                 for p in pts[1:-1]]
+    max_d, max_i = max((d, i) for i, d in enumerate(dists))
+    if max_d > eps:
+        split = max_i + 1
+        return _rdp(pts[:split + 1], eps)[:-1] + _rdp(pts[split:], eps)
+    return [pts[0], pts[-1]]
+
+
 class PathPlanner:
     """맵 1프레임에 대한 planner. 맵이 갱신되면 새로 만든다.
 
@@ -166,4 +189,8 @@ class PathPlanner:
         if truncate_end_cells > 0 and len(cells) > truncate_end_cells + 2:
             cells = cells[:-truncate_end_cells]
 
-        return [grid_to_world(self.mapdata, c) for c in cells], cost
+        world_pts = [grid_to_world(self.mapdata, c) for c in cells]
+        # RDP 스무딩: 3셀(~0.15m) 이내 지그재그 제거 → pure_pursuit 각속도 진동 억제
+        if len(world_pts) > 2:
+            world_pts = _rdp(world_pts, 3.0 * self.mapdata.info.resolution)
+        return world_pts, cost
