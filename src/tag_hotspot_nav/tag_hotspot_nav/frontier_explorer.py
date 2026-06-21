@@ -21,9 +21,11 @@ import math
 import rclpy
 from rclpy.node import Node
 from rclpy.duration import Duration
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 from geometry_msgs.msg import PoseStamped, Quaternion, TwistStamped
 from nav_msgs.msg import GridCells, OccupancyGrid, Path
+from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool, String
 from visualization_msgs.msg import Marker, MarkerArray
 from slam_toolbox.srv import Reset
@@ -59,6 +61,8 @@ class FrontierExplorerNode(Node):
         # 좁은 공간 탈출 후진
         self.declare_parameter('backup_duration', 2.5)      # [s]
         self.declare_parameter('backup_speed', -0.2)        # [m/s]
+        # FIX-stuck-4: 후진 시 후방 장애물 인식 — 이 거리 이하로 막히면 후진 중단(벽 박기 방지)
+        self.declare_parameter('backup_min_rear', 0.35)     # [m] 후방 최소 여유
         # FIX-stuck-2: 후진 후 제자리회전 탈출 — 모서리는 직진 후진만으론 같은 데로 재진입.
         self.declare_parameter('escape_rotate_duration', 1.5)  # [s] 0이면 회전 탈출 off
         self.declare_parameter('escape_rotate_speed', 0.6)     # [rad/s]
@@ -90,6 +94,8 @@ class FrontierExplorerNode(Node):
         self.escape_rotate_duration = self.get_parameter('escape_rotate_duration').value
         self.escape_rotate_speed = self.get_parameter('escape_rotate_speed').value
         self.stuck_escape_max = int(self.get_parameter('stuck_escape_max').value)
+        self.backup_min_rear = float(self.get_parameter('backup_min_rear').value)
+        self.rear_clear = float('inf')   # FIX-stuck-4: 후방 ±25° 최근접 거리(/scan)
         self._np_pos = None      # 무진전 감지: 마지막 진전 위치
         self._np_t = None
         self.blacklist_radius = self.get_parameter('blacklist_radius').value
@@ -103,6 +109,9 @@ class FrontierExplorerNode(Node):
             Bool, '/goal_reached', self.goal_reached_callback, 10)
         self.command_sub = self.create_subscription(
             String, '/explore/command', self.command_callback, 10)
+        # FIX-stuck-4: 후진 안전용 후방 거리 (BEST_EFFORT 로 /scan 매칭)
+        scan_qos = QoSProfile(depth=5, reliability=ReliabilityPolicy.BEST_EFFORT)
+        self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, scan_qos)
 
         self.plan_pub = self.create_publisher(Path, '/plan', 10)
         self.finish_pub = self.create_publisher(Bool, '/finish_exploration', 10)
@@ -151,6 +160,18 @@ class FrontierExplorerNode(Node):
     def map_callback(self, msg: OccupancyGrid):
         self.mapdata = msg
 
+    def scan_callback(self, msg: LaserScan):
+        # FIX-stuck-4: 후방 ±25° 최근접 거리 → 후진 안전 게이트용
+        rear = float('inf')
+        half = math.radians(25.0)
+        for i, r in enumerate(msg.ranges):
+            if r <= msg.range_min or math.isinf(r) or math.isnan(r):
+                continue
+            angle = msg.angle_min + i * msg.angle_increment
+            if abs(abs(angle) - math.pi) < half:   # 후방(180°) ±25°
+                rear = min(rear, r)
+        self.rear_clear = rear
+
     def _motion_cb(self):
         """스캔 회전 / 후진 탈출 cmd_vel 발행 (0.1s 주기)."""
         now = self.get_clock().now()
@@ -165,16 +186,21 @@ class FrontierExplorerNode(Node):
                 self.get_logger().info('스캔 회전 완료 → 다음 frontier 탐색')
             self._cmd_pub.publish(twist)
         elif self._backing_up:
-            if self._backup_end_time and now < self._backup_end_time:
+            # FIX-stuck-4: 후방이 backup_min_rear 이하로 막히면 후진 중단(벽 박기 방지)
+            rear_ok = self.rear_clear > self.backup_min_rear
+            if self._backup_end_time and now < self._backup_end_time and rear_ok:
                 twist.twist.linear.x = self.backup_speed
             else:
                 self._backing_up = False
-                # FIX-stuck-2: 후진 후 제자리회전으로 헤딩 전환(모서리 재진입 방지)
+                if not rear_ok:
+                    self.get_logger().warn(
+                        f'후방 {self.rear_clear:.2f}m 막힘 → 후진 중단(벽 박기 방지)')
+                # FIX-stuck-2: 후진(또는 중단) 후 제자리회전으로 헤딩 전환
                 if self.escape_rotate_duration > 0:
                     self._rotate_escape = True
                     self._rotate_end_time = (now + Duration(
                         seconds=self.escape_rotate_duration))
-                    self.get_logger().info('후진 완료 → 제자리회전 탈출')
+                    self.get_logger().info('후진 종료 → 제자리회전 탈출')
                 else:
                     self.get_logger().info('후진 탈출 완료 → 재계획')
             self._cmd_pub.publish(twist)
