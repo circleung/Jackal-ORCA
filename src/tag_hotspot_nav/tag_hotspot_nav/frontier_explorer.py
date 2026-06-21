@@ -62,6 +62,8 @@ class FrontierExplorerNode(Node):
         # FIX-stuck-2: 후진 후 제자리회전 탈출 — 모서리는 직진 후진만으론 같은 데로 재진입.
         self.declare_parameter('escape_rotate_duration', 1.5)  # [s] 0이면 회전 탈출 off
         self.declare_parameter('escape_rotate_speed', 0.6)     # [rad/s]
+        # FIX-stuck-3: 끼임에 의한 조기 false-"탐사완료" 방지 — 종료 직전 탈출 시도 횟수
+        self.declare_parameter('stuck_escape_max', 3)
         self.declare_parameter('blacklist_radius', 0.6)     # [m] 실패 frontier 회피 반경
         self.declare_parameter('blacklist_ttl', 60.0)       # [s] blacklist 유효 시간
         self.declare_parameter('blacklist_max_strikes', 3)  # 이 횟수 실패 시 영구 차단
@@ -87,6 +89,7 @@ class FrontierExplorerNode(Node):
         self.backup_speed = self.get_parameter('backup_speed').value
         self.escape_rotate_duration = self.get_parameter('escape_rotate_duration').value
         self.escape_rotate_speed = self.get_parameter('escape_rotate_speed').value
+        self.stuck_escape_max = int(self.get_parameter('stuck_escape_max').value)
         self._np_pos = None      # 무진전 감지: 마지막 진전 위치
         self._np_t = None
         self.blacklist_radius = self.get_parameter('blacklist_radius').value
@@ -120,6 +123,7 @@ class FrontierExplorerNode(Node):
         self.goal_start_time = None
         self.no_frontiers_count = 0
         self.all_failed_count = 0    # 연속 "전 후보 진행 불가" 사이클 수
+        self._stuck_escape_count = 0 # FIX-stuck-3: 종료 직전 탈출 시도 횟수
         # 실패 frontier 기록 {(x, y): [마지막 실패 시각, 누적 실패 횟수]}
         # TTL 안에는 회피, TTL 지나면 재시도 자격 (도달 직후 일시 정체로
         # 영구 차단되는 문제 방지). max_strikes 누적 시에만 영구 차단.
@@ -455,12 +459,28 @@ class FrontierExplorerNode(Node):
             if self.all_failed_count >= self.no_frontier_limit:
                 if self.try_final_sweep():
                     return
+                # FIX-stuck-3: 끼임에 의한 조기 false-완료 방지 — 종료 직전 탈출 시도(K회).
+                # 어디로도 경로계획이 지속 실패 = 끼임 가능성 → 후진/회전으로 재위치 후
+                # 재시도. K회 모두 소용없을 때만 진짜 종료.
+                if (self._stuck_escape_count < self.stuck_escape_max
+                        and self.backup_duration > 0):
+                    self._stuck_escape_count += 1
+                    self._backing_up = True
+                    self._backup_end_time = (self.get_clock().now()
+                                             + Duration(seconds=self.backup_duration))
+                    self.is_navigating = False
+                    self.all_failed_count = 0   # 종료 보류, 재시도
+                    self.get_logger().warn(
+                        f'진행 불가 지속 → 끼임 탈출 시도 '
+                        f'({self._stuck_escape_count}/{self.stuck_escape_max}) 후 재시도')
+                    return
                 self.get_logger().info('진행 가능한 frontier 없음 → 탐사 완료!')
                 self.finished = True
                 self.plan_pub.publish(Path())
                 self.finish_pub.publish(Bool(data=True))
             return
         self.all_failed_count = 0
+        self._stuck_escape_count = 0    # 진행 재개 → 탈출 시도 카운트 리셋
         self.final_sweep_done = False   # 진행 재개 → 다음 정체 때 스윕 재허용
         # 성공한 사이클의 실패 후보만 blacklist 에 기록 (TTL + strike 방식)
         for cx, cy in cycle_blacklist:
