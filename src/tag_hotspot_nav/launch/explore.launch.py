@@ -43,11 +43,11 @@ def generate_launch_description():
             name='frontier_explorer',
             output='screen',
             parameters=[{
-                'robot_radius': 0.22,
+                'robot_radius': 0.30,
                 'goal_timeout': 60.0,
                 'no_progress_timeout': 12.0,  # 막힘 인내심 ↑ (경로 유지). 첫 무진전은 같은 목표 재시도
                 'no_frontier_limit': 6,       # 종료/스윕 판정 완화 (blacklist 잦은 리셋 방지)
-                'heading_weight': 4.0,         # DFS: 현재 방향 4배 우선
+                'heading_weight': 2.0,         # DFS: 현재 방향 4배 우선
                 'scan_spin_duration': 0.0,     # 탐사 중 스핀 off
                 'cmd_vel_topic': cmd_vel_topic,
                 'backup_duration': 2.0,
