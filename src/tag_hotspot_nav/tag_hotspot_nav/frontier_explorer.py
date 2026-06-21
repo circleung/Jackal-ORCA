@@ -59,6 +59,9 @@ class FrontierExplorerNode(Node):
         # 좁은 공간 탈출 후진
         self.declare_parameter('backup_duration', 2.5)      # [s]
         self.declare_parameter('backup_speed', -0.2)        # [m/s]
+        # FIX-stuck-2: 후진 후 제자리회전 탈출 — 모서리는 직진 후진만으론 같은 데로 재진입.
+        self.declare_parameter('escape_rotate_duration', 1.5)  # [s] 0이면 회전 탈출 off
+        self.declare_parameter('escape_rotate_speed', 0.6)     # [rad/s]
         self.declare_parameter('blacklist_radius', 0.6)     # [m] 실패 frontier 회피 반경
         self.declare_parameter('blacklist_ttl', 60.0)       # [s] blacklist 유효 시간
         self.declare_parameter('blacklist_max_strikes', 3)  # 이 횟수 실패 시 영구 차단
@@ -82,6 +85,8 @@ class FrontierExplorerNode(Node):
         self.scan_spin_angular = self.get_parameter('scan_spin_angular').value
         self.backup_duration = self.get_parameter('backup_duration').value
         self.backup_speed = self.get_parameter('backup_speed').value
+        self.escape_rotate_duration = self.get_parameter('escape_rotate_duration').value
+        self.escape_rotate_speed = self.get_parameter('escape_rotate_speed').value
         self._np_pos = None      # 무진전 감지: 마지막 진전 위치
         self._np_t = None
         self.blacklist_radius = self.get_parameter('blacklist_radius').value
@@ -131,6 +136,8 @@ class FrontierExplorerNode(Node):
         self._scan_end_time = None
         self._backing_up = False
         self._backup_end_time = None
+        self._rotate_escape = False   # FIX-stuck-2: 후진 후 제자리회전 탈출 상태
+        self._rotate_end_time = None
 
         self.timer = self.create_timer(1.0, self.explore_step)
         self.create_timer(0.1, self._motion_cb)
@@ -158,7 +165,21 @@ class FrontierExplorerNode(Node):
                 twist.twist.linear.x = self.backup_speed
             else:
                 self._backing_up = False
-                self.get_logger().info('후진 탈출 완료 → 재계획')
+                # FIX-stuck-2: 후진 후 제자리회전으로 헤딩 전환(모서리 재진입 방지)
+                if self.escape_rotate_duration > 0:
+                    self._rotate_escape = True
+                    self._rotate_end_time = (now + Duration(
+                        seconds=self.escape_rotate_duration))
+                    self.get_logger().info('후진 완료 → 제자리회전 탈출')
+                else:
+                    self.get_logger().info('후진 탈출 완료 → 재계획')
+            self._cmd_pub.publish(twist)
+        elif self._rotate_escape:
+            if self._rotate_end_time and now < self._rotate_end_time:
+                twist.twist.angular.z = self.escape_rotate_speed
+            else:
+                self._rotate_escape = False
+                self.get_logger().info('제자리회전 탈출 완료 → 재계획')
             self._cmd_pub.publish(twist)
 
     def _record_visit(self, cx: float, cy: float):
@@ -265,7 +286,7 @@ class FrontierExplorerNode(Node):
 
     # ── 메인 루프 ──────────────────────────────────────────────
     def explore_step(self):
-        if self._scanning or self._backing_up:
+        if self._scanning or self._backing_up or self._rotate_escape:
             return
         if self.paused or self.finished or self.mapdata is None:
             return
