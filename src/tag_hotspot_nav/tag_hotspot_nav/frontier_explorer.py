@@ -26,7 +26,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 from geometry_msgs.msg import PoseStamped, Quaternion, TwistStamped
 from nav_msgs.msg import GridCells, OccupancyGrid, Path
 from sensor_msgs.msg import LaserScan
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, Int32, String
 from visualization_msgs.msg import Marker, MarkerArray
 from slam_toolbox.srv import Reset
 from tf2_ros import Buffer, TransformListener
@@ -112,6 +112,9 @@ class FrontierExplorerNode(Node):
         # FIX-stuck-4: 후진 안전용 후방 거리 (BEST_EFFORT 로 /scan 매칭)
         scan_qos = QoSProfile(depth=5, reliability=ReliabilityPolicy.BEST_EFFORT)
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, scan_qos)
+        # DIAG: 미션 목표(apriltag 캡처) 추적 — /tag_new(신규 태그 이벤트) 카운트
+        self._tags_captured = 0
+        self.create_subscription(Int32, '/tag_new', self._tag_new_cb, 10)
 
         self.plan_pub = self.create_publisher(Path, '/plan', 10)
         self.finish_pub = self.create_publisher(Bool, '/finish_exploration', 10)
@@ -159,6 +162,9 @@ class FrontierExplorerNode(Node):
     # ── 콜백 ───────────────────────────────────────────────────
     def map_callback(self, msg: OccupancyGrid):
         self.mapdata = msg
+
+    def _tag_new_cb(self, msg: Int32):
+        self._tags_captured += 1
 
     def scan_callback(self, msg: LaserScan):
         # FIX-stuck-4: 후방 ±25° 최근접 거리 → 후진 안전 게이트용
@@ -234,13 +240,16 @@ class FrontierExplorerNode(Node):
             self._np_retry_goal = None
             if self.current_goal is not None:
                 self._record_visit(*self.current_goal)
-                # 부분경로(도달 불가) 목표는 끝점 도달=영역 미밝힘 → blacklist 해서
-                # 다음 사이클에 같은 frontier 재선택(반복 루트)을 끊는다.
+                # FIX-explore: 부분경로는 '먼 frontier 점진 접근'의 정상 단계다(A* 는
+                # unknown 으로 경로를 못 내므로 먼 목표는 항상 부분경로로 시작 → 끝점
+                # 도달 시 맵이 확장되어 다음엔 더 멀리 계획됨). 즉시 blacklist 하면
+                # 도달가능한 먼 빈 영역을 한 번에 영구 포기 → 조기 종료/로컬미니멈의 주범.
+                # 진짜 막다른 곳(같은 자리 반복, 새 영역 0)은 _record_visit 의
+                # revisit_limit 이 차단하므로 여기선 blacklist 하지 않는다.
                 if self._goal_partial:
-                    self.add_to_blacklist(*self.current_goal)
-                    self.get_logger().warn(
-                        f'도달불가 frontier ({self.current_goal[0]:.2f},'
-                        f'{self.current_goal[1]:.2f}) 부분경로 끝 도달 → blacklist')
+                    self.get_logger().info(
+                        f'부분경로 끝 도달 ({self.current_goal[0]:.2f},'
+                        f'{self.current_goal[1]:.2f}) → 맵 확장, 재계획(blacklist 안 함)')
             if self.scan_spin_duration > 0:
                 self._scanning = True
                 self._scan_end_time = (self.get_clock().now()
@@ -388,9 +397,14 @@ class FrontierExplorerNode(Node):
         # 1) frontier 탐지
         mapdata = self.mapdata
         start_grid = world_to_grid(mapdata, *robot_pose)
-        frontiers = detect_frontiers(mapdata, start_grid, self.min_frontier_size)
-        frontiers = [f for f in frontiers if not self.is_blacklisted(f.centroid)]
+        frontiers_all = detect_frontiers(mapdata, start_grid, self.min_frontier_size)
+        frontiers = [f for f in frontiers_all if not self.is_blacklisted(f.centroid)]
         self.publish_visualization(frontiers, mapdata)
+        # DIAG: 실주행 최적화용 기록 — 매 사이클 탐지/후보/blacklist/태그 카운트.
+        # (frontier 너무 적음=탐지문제 vs 후보만 적음=blacklist문제 즉시 구분)
+        self.get_logger().info(
+            f'[DIAG] frontier 탐지={len(frontiers_all)} 후보={len(frontiers)} '
+            f'blacklist={len(self.blacklist)} 태그캡처={self._tags_captured}')
 
         # 2) 종료 판정
         if not frontiers:

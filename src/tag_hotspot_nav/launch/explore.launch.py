@@ -49,7 +49,7 @@ def generate_launch_description():
                 'no_frontier_limit': 15,      # 6→15: 성급한 조기 종료 방지(로컬미니멈 완화)
                 'heading_weight': 1.0,         # 2.0→1.0: DFS 완화 → 먼 빈 영역도 선택
                 'revisit_limit': 3,           # 2→3: 영구차단 완화(재방문 여유)
-                'min_frontier_size': 35,      # 50→35: 다른 방 입구(작은 개구부)도 탐지
+                'min_frontier_size': 12,      # 50→12: 작은 frontier/문 입구도 탐지(탐지 너무 적던 문제)
                 'scan_spin_duration': 0.0,     # 탐사 중 스핀 off
                 'cmd_vel_topic': cmd_vel_topic,
                 'backup_duration': 2.0,
