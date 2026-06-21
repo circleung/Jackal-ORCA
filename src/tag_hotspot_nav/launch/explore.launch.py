@@ -46,12 +46,15 @@ def generate_launch_description():
                 'robot_radius': 0.30,
                 'goal_timeout': 60.0,
                 'no_progress_timeout': 12.0,  # 막힘 인내심 ↑ (경로 유지). 첫 무진전은 같은 목표 재시도
-                'no_frontier_limit': 6,       # 종료/스윕 판정 완화 (blacklist 잦은 리셋 방지)
-                'heading_weight': 2.0,         # DFS: 현재 방향 4배 우선
+                'no_frontier_limit': 15,      # 6→15: 성급한 조기 종료 방지(로컬미니멈 완화)
+                'heading_weight': 1.0,         # 2.0→1.0: DFS 완화 → 먼 빈 영역도 선택
+                'revisit_limit': 3,           # 2→3: 영구차단 완화(재방문 여유)
+                'min_frontier_size': 35,      # 50→35: 다른 방 입구(작은 개구부)도 탐지
                 'scan_spin_duration': 0.0,     # 탐사 중 스핀 off
                 'cmd_vel_topic': cmd_vel_topic,
                 'backup_duration': 2.0,
                 'backup_speed': -0.2,
+                'backup_min_rear': 0.35,      # FIX-stuck-4: 후방 0.35m 이하 막히면 후진 중단
             }],
             remappings=tf_remaps + [('/map', map_topic)],
         ),
@@ -64,9 +67,9 @@ def generate_launch_description():
             parameters=[{
                 'cmd_vel_topic': pp_cmd_topic,
                 'linear_speed': linear_speed,
-                'lookahead': 0.9,             # 1.2→0.9: 코너 타겟 점프 완화(진동·과회전 억제)
-                'max_angular': 0.6,
-                'goal_tolerance': 0.30,
+                'lookahead': 0.55,            # 0.9→0.55: 코너 잘라먹기 완화(경로 추종 정확도↑)
+                'max_angular': 0.9,           # 0.6→0.9: 곡선 추종 가능(회전 속도↑)
+                'goal_tolerance': 0.20,       # 0.30→0.20: 계획점에 더 근접 도달(오blacklist 감소)
                 'stop_dist': 0.40,            # 정지 진입(0.50→0.40, range_min 0.20이라 유효)
                 'stop_release_dist': 0.55,    # 정지 해제(히스테리시스 → 정지-주행 토글 제거)
                 'slow_down_dist': 0.70,       # 0.70m까지 안 감속 → 복도 빠르게 통과
