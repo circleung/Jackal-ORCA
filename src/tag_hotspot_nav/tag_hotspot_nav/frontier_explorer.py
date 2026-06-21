@@ -318,6 +318,10 @@ class FrontierExplorerNode(Node):
                             f'무진전({self.no_progress_timeout:.0f}s, 막힘 추정) → 후진 후 재계획')
                     # 좁은 공간 탈출: 후진
                     if self.backup_duration > 0:
+                        # FIX-stuck-1(A): 후진 핸드오프 — 빈 /plan 으로 pure_pursuit 를
+                        # 정지시켜 cmd_vel 을 양보받는다. 안 그러면 pure_pursuit 가 옛 경로로
+                        # 0(정지)을 계속 발행해 후진(-0.2)과 경합 → 실제로 안 물러남.
+                        self.plan_pub.publish(Path())
                         self._backing_up = True
                         self._backup_end_time = (self.get_clock().now()
                                                  + Duration(seconds=self.backup_duration))
