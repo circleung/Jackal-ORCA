@@ -167,6 +167,66 @@ class PathPlanner:
 
         return None, float('inf'), False
 
+    # ── 경로 직선화 (cost-aware string-pulling) ──────────────────
+    def _line_clear(self, c0, c1, cost_budget):
+        """Bresenham 직선상 모든 셀이 (1) C-space 통행 가능 AND (2) cost_map 값이
+        cost_budget 이하인지. (2) 덕분에 직선화가 '원본 경로보다 벽에 더 붙는'
+        지름길을 거부 → 복도 중앙 선호를 유지하면서도 넓은 곳은 직선이 된다."""
+        x0, y0 = c0
+        x1, y1 = c1
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+        h, w = self.walkable.shape
+        x, y = x0, y0
+        while True:
+            if not (0 <= x < w and 0 <= y < h and self.walkable[y, x]):
+                return False
+            if self.cost_map[y, x] > cost_budget:
+                return False
+            if x == x1 and y == y1:
+                return True
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x += sx
+            if e2 < dx:
+                err += dx
+                y += sy
+
+    # 하위호환(테스트용): 순수 통행가능 직선검사
+    def _line_walkable(self, c0, c1):
+        return self._line_clear(c0, c1, float('inf'))
+
+    def _shortcut(self, cells):
+        """cost-aware string-pulling: 가시선이 통하면서 '원본 부분경로가 지난
+        최대 cost(=가장 벽에 가까웠던 정도)'를 넘지 않는 가장 먼 점으로 직선 연결.
+        - 넓은 곳(cost≈0): 완전 직선화(노이즈 우회 loop 제거)
+        - 복도/코너: 코너컷 지름길은 안쪽 벽 cost를 넘어 거부 → A* 중앙경로 유지"""
+        if len(cells) <= 2:
+            return cells
+        n = len(cells)
+        path_costs = [float(self.cost_map[c[1], c[0]]) for c in cells]
+        eps = 1e-3
+        out = [cells[0]]
+        i = 0
+        while i < n - 1:
+            # cells[i..k] 의 prefix-max cost → 직선 j 후보가 넘으면 안 되는 한도
+            run = path_costs[i]
+            pm = [0.0] * n
+            for k in range(i, n):
+                if path_costs[k] > run:
+                    run = path_costs[k]
+                pm[k] = run
+            j = n - 1
+            while j > i + 1 and not self._line_clear(cells[i], cells[j], pm[j] + eps):
+                j -= 1
+            out.append(cells[j])
+            i = j
+        return out
+
     # ── 공개 API ─────────────────────────────────────────────────
     def plan(self, start_world, goal_world, truncate_end_cells: int = 0):
         """world 좌표 (x, y) 튜플 2개로 경로 계획.
@@ -191,8 +251,12 @@ class PathPlanner:
         if truncate_end_cells > 0 and len(cells) > truncate_end_cells + 2:
             cells = cells[:-truncate_end_cells]
 
+        # string-pulling 직선화: 넓은 영역에서 격자 톱니·노이즈 우회로 생긴 꼬임을
+        # 가시선 직선으로 편다(C-space 충돌검사 포함 → 안전). 이게 핵심 — RDP만으론
+        # cost_map 이 벽/노이즈를 피해 휘게 만든 곡선을 못 편다.
+        cells = self._shortcut(cells)
         world_pts = [grid_to_world(self.mapdata, c) for c in cells]
-        # RDP 스무딩: 3셀(~0.15m) 이내 지그재그 제거 → pure_pursuit 각속도 진동 억제
+        # RDP: string-pulling 후 남은 미세 지그재그 정리 → pure_pursuit 각속도 진동 억제
         if len(world_pts) > 2:
             world_pts = _rdp(world_pts, 3.0 * self.mapdata.info.resolution)
         return world_pts, cost, reached

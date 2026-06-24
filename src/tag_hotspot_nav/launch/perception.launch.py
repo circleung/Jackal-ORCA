@@ -109,7 +109,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'eps': 2.0,          # [m] 같은 hotspot으로 묶을 태그 간 최대 거리
-                'min_samples': 2,    # hotspot 성립 최소 태그 수(자기 포함)
+                'min_samples': 1,    # 2→1: 희소 태그도 각자 hotspot=목표(2m이상 떨어진 태그도 인정)
                 'cluster_period': 3.0,
                 'map_frame': map_frame,
             }],

@@ -127,6 +127,28 @@ def save():
         time.sleep(0.1)
     ok_clean = _save_grid('/map_nav', base + '_clean') if has_mapnav else None
 
+    # 4) 태그 좌표 스냅샷 — 같은 stamp 로 함께 저장 → 저장 맵과 좌표계(frame) 정합 보장.
+    #    tag_collector 가 ~/colcon_ws/tag_observations.json 에 계속 쓰는 현재 추정치를
+    #    map_<stamp>.tags.json 으로 복사(여기에 맵 frame/stamp 메타 추가).
+    import json as _json
+    tags_src = os.path.expanduser('~/colcon_ws/tag_observations.json')
+    tags_dst = base + '.tags.json'
+    ok_tags = False
+    n_tags = 0
+    try:
+        with open(tags_src) as f:
+            tagdata = _json.load(f)
+        n_tags = len(tagdata.get('tags', {}))
+        tagdata['saved_with_map'] = os.path.basename(base)
+        tagdata['saved_stamp'] = stamp
+        with open(tags_dst, 'w') as f:
+            _json.dump(tagdata, f, indent=2)
+        ok_tags = True
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
     node.destroy_node()
     rclpy.shutdown()
 
@@ -136,3 +158,7 @@ def save():
         print(f"정리맵(/map_nav) 저장: {'OK' if ok_clean else '실패'} → {base}_clean.pgm/.yaml")
     else:
         print("정리맵(/map_nav): 스킵 (map_cleaner 미사용)")
+    if ok_tags:
+        print(f"태그 좌표 저장: OK ({n_tags}개) → {tags_dst}")
+    else:
+        print(f"태그 좌표 저장: 스킵 (tag_observations.json 없음/비어있음)")

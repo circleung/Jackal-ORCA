@@ -47,7 +47,13 @@ class PurePursuitNode(Node):
         self.declare_parameter('cmd_vel_topic', '/j100_0915/cmd_vel')
         self.declare_parameter('linear_speed', 0.3)       # [m/s]
         self.declare_parameter('max_angular', 1.0)        # [rad/s]
-        self.declare_parameter('lookahead', 0.4)          # [m]
+        self.declare_parameter('lookahead', 0.4)          # [m] 최대(넓은 공간) lookahead
+        # 적응형 lookahead: 주변(surround)이 좁을수록 lookahead 를 줄여 코너를 타이트하게
+        # 추종(큰 호로 벽에 붙는 것 방지). clear<=clear_lo → lookahead_min,
+        # clear>=clear_hi → lookahead(최대), 사이는 선형보간. lookahead_min=lookahead 면 off.
+        self.declare_parameter('lookahead_min', 0.30)       # [m] 좁은 복도 최소 lookahead
+        self.declare_parameter('lookahead_clear_lo', 0.40)  # [m] 이 이하 clearance → 최소
+        self.declare_parameter('lookahead_clear_hi', 0.90)  # [m] 이 이상 clearance → 최대
         self.declare_parameter('goal_tolerance', 0.15)    # [m]
         self.declare_parameter('rotate_in_place_angle', 1.0)   # [rad] 이 이상 틀어지면 제자리 회전
         # 회전모드 진입/해제 히스테리시스: 진입(rotate_in_place_angle) > 해제(rotate_exit_angle).
@@ -80,6 +86,9 @@ class PurePursuitNode(Node):
         self.linear_speed = self.get_parameter('linear_speed').value
         self.max_angular = self.get_parameter('max_angular').value
         self.lookahead = self.get_parameter('lookahead').value
+        self.lookahead_min = float(self.get_parameter('lookahead_min').value)
+        self.lookahead_clear_lo = float(self.get_parameter('lookahead_clear_lo').value)
+        self.lookahead_clear_hi = float(self.get_parameter('lookahead_clear_hi').value)
         self.goal_tolerance = self.get_parameter('goal_tolerance').value
         self.rotate_angle = self.get_parameter('rotate_in_place_angle').value
         self.rotate_exit_angle = self.get_parameter('rotate_exit_angle').value
@@ -184,6 +193,19 @@ class PurePursuitNode(Node):
             (self.rotate_slow_clearance - self.rotate_stop_clearance)
         return self.rotate_min_scale + (1.0 - self.rotate_min_scale) * f
 
+    def _adaptive_lookahead(self) -> float:
+        """주변(전방위 최근접) 거리에 비례해 lookahead 동적 조절. 좁으면 작게(타이트
+        추종 → 큰 호로 벽에 붙는 것 방지), 넓으면 크게(부드럽게).
+        clear<=clear_lo → min, clear>=clear_hi → max(self.lookahead), 사이는 선형보간."""
+        c = self.surround_clearance
+        lo, hi = self.lookahead_clear_lo, self.lookahead_clear_hi
+        lmin, lmax = self.lookahead_min, self.lookahead
+        if not math.isfinite(c) or c >= hi:
+            return lmax
+        if c <= lo:
+            return lmin
+        return lmin + (lmax - lmin) * (c - lo) / (hi - lo)
+
     # ── 로봇 포즈 ──────────────────────────────────────────────
     def get_robot_pose(self):
         try:
@@ -212,16 +234,56 @@ class PurePursuitNode(Node):
             self.goal_reached_pub.publish(Bool(data=True))
             return
 
-        # 2) lookahead 목표점: 진행 인덱스부터 앞으로만 탐색
+        # 2) lookahead 목표점(carrot): 폴리라인 위에 lookahead 거리만큼 보간한 점.
+        #    (희소 정점을 직접 찍던 기존 방식은 2점 경로에서 최종 goal 을 그대로 추종 →
+        #     dist 가 커져 곡률 2*y/dist² 가 0 으로 붕괴, 경로 무시. 아래로 교체.)
+        look = self._adaptive_lookahead()
         target = None
-        for i in range(self.path_index, len(self.path)):
-            px, py = self.path[i]
-            if math.hypot(px - rx, py - ry) >= self.lookahead:
-                target = (px, py)
-                self.path_index = i
-                break
+        # (a) self.path_index 이후 세그먼트 중 로봇 최근접점이 있는 세그먼트 탐색
+        best_seg = self.path_index
+        best_d2 = float('inf')
+        best_t = 0.0
+        for i in range(self.path_index, len(self.path) - 1):
+            ax, ay = self.path[i]
+            bx, by = self.path[i + 1]
+            ex, ey = bx - ax, by - ay
+            seg2 = ex * ex + ey * ey
+            if seg2 < 1e-12:
+                t = 0.0
+            else:
+                t = ((rx - ax) * ex + (ry - ay) * ey) / seg2
+                t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+            cx, cy = ax + t * ex, ay + t * ey
+            d2 = (cx - rx) ** 2 + (cy - ry) ** 2
+            if d2 < best_d2:
+                best_d2 = d2
+                best_seg = i
+                best_t = t
+        self.path_index = max(self.path_index, best_seg)   # 단조 증가 (뒤로 안 감)
+        # (b) 최근접점에서 폴리라인 따라 look 만큼 전진한 carrot 보간
+        if len(self.path) >= 2 and best_seg <= len(self.path) - 2:
+            ax, ay = self.path[best_seg]
+            bx, by = self.path[best_seg + 1]
+            seg_len = math.hypot(bx - ax, by - ay)
+            seg_remain = (1.0 - best_t) * seg_len
+            if look <= seg_remain:
+                f = ((best_t * seg_len + look) / seg_len) if seg_len > 1e-9 else 1.0
+                target = (ax + f * (bx - ax), ay + f * (by - ay))
+            else:
+                remain = look - seg_remain
+                target = (bx, by)
+                for j in range(best_seg + 1, len(self.path) - 1):
+                    ax, ay = self.path[j]
+                    bx, by = self.path[j + 1]
+                    seg_len = math.hypot(bx - ax, by - ay)
+                    if remain <= seg_len:
+                        f = (remain / seg_len) if seg_len > 1e-9 else 0.0
+                        target = (ax + f * (bx - ax), ay + f * (by - ay))
+                        break
+                    remain -= seg_len
+                    target = (bx, by)
         if target is None:
-            target = self.path[-1]   # 전부 lookahead 안쪽 → 최종점 직접 추종
+            target = self.path[-1]   # 남은 경로가 lookahead 보다 짧음 → 끝점 추종
 
         # 3) 목표점을 로봇 좌표계로
         dx = target[0] - rx

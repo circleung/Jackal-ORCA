@@ -63,6 +63,9 @@ class TagCollectorNode(Node):
         self.declare_parameter('use_latest_tf', False)
         self.declare_parameter('tf_timeout', 0.1)         # [s] stamp TF 버퍼 대기 한도
         self.declare_parameter('raw_cap', 1000)           # 태그별 원시관측 보관 상한 (median용)
+        # 고정핀: 관측이 이만큼 쌓이면 위치를 '잠가서' 더 이상 움직이지 않게 한다.
+        # (로봇 이동/시점변화/SLAM 드리프트로 median 이 계속 흔들리는 문제 해결). 0=잠금 안 함.
+        self.declare_parameter('lock_after', 5)           # N 관측 후 위치 고정
         self.declare_parameter('max_range', 6.0)          # [m] 이 이상 멀면 신뢰 안 함(원거리 노이즈)
         self.declare_parameter('min_decision_margin', 30.0)  # apriltag 품질 하한
         self.declare_parameter('publish_rate', 2.0)       # [Hz] /tags_in_map
@@ -75,6 +78,7 @@ class TagCollectorNode(Node):
         self.use_latest_tf = bool(self.get_parameter('use_latest_tf').value)
         self.tf_timeout = float(self.get_parameter('tf_timeout').value)
         self.raw_cap = int(self.get_parameter('raw_cap').value)
+        self.lock_after = int(self.get_parameter('lock_after').value)
         self.max_range = float(self.get_parameter('max_range').value)
         self.min_margin = float(self.get_parameter('min_decision_margin').value)
         self.output_path = self.get_parameter('output_path').value
@@ -105,6 +109,7 @@ class TagCollectorNode(Node):
         #   {'count':n, 'last_seen':TimeMsg, 'source':str,
         #    'raw':[[x,y,z,margin], ...] (median 으로 안정 추정)}
         self.tags = {}
+        self._last_clear_t = -1e9   # go/reset 디바운스용
 
         # ── 입력 ────────────────────────────────────────────────
         det_qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
@@ -141,10 +146,18 @@ class TagCollectorNode(Node):
         self.cam_D[source] = np.array(msg.d, dtype=np.float64)
 
     def command_cb(self, msg: String):
-        if msg.data.strip().lower() == 'reset':
+        # 'go'/'reset' 둘 다에서 비운다. 'go'는 SLAM 리셋(map frame 변경)을 동반하므로
+        # 안 비우면 이전 frame 좌표가 stale 로 남아(고정핀이면 갱신도 안 됨) 잘못된 위치가 박힘.
+        if msg.data.strip().lower() in ('reset', 'go'):
+            # 디바운스: 'go'는 보통 여러 번 반복발행되므로, 10s 내 중복 클리어는 무시
+            # (안 그러면 시작 직후 태그가 잡혔다 지워졌다 반복됨).
+            now = self.get_clock().now().nanoseconds * 1e-9
+            if now - self._last_clear_t < 10.0:
+                return
+            self._last_clear_t = now
             n = len(self.tags)
             self.tags.clear()
-            self.get_logger().info(f'reset 수신 — 태그 누적 리셋 (이전 {n}개 폐기)')
+            self.get_logger().info(f"'{msg.data.strip()}' 수신 — 태그 누적 리셋 (이전 {n}개 폐기)")
 
     def det_cb(self, msg: AprilTagDetectionArray, source: str):
         if cv2 is None or source not in self.cam_K:
@@ -225,13 +238,25 @@ class TagCollectorNode(Node):
         t['count'] += 1
         t['last_seen'] = stamp
         t['source'] = source
+        # 이미 고정핀 잠금된 태그는 위치 갱신 안 함(흔들림 방지). count/last_seen 만 갱신.
+        if t.get('locked_pos') is not None:
+            return
         t['raw'].append([p[0], p[1], p[2], margin])
         if len(t['raw']) > self.raw_cap:        # 메모리 상한 (오래된 것 버림)
             t['raw'].pop(0)
+        # 고정핀: 관측 충분 → median 1회 계산해 위치 잠금(이후 안 움직임)
+        if self.lock_after > 0 and t['count'] >= self.lock_after:
+            t['locked_pos'] = self._estimate(t).tolist()
+            self.get_logger().info(
+                f'태그 #{tag_id} 위치 고정(고정핀) '
+                f'map=({t["locked_pos"][0]:.2f},{t["locked_pos"][1]:.2f}) '
+                f'— {t["count"]}관측 후 잠금')
 
     @staticmethod
     def _estimate(t):
-        """누적 원시관측의 median 위치 (EMA 보다 드리프트/이상치에 강건)."""
+        """고정핀 잠금됐으면 잠긴 위치, 아니면 누적 원시관측의 median(드리프트/이상치 강건)."""
+        if t.get('locked_pos') is not None:
+            return np.asarray(t['locked_pos'], dtype=np.float64)
         arr = np.asarray(t['raw'], dtype=np.float64)[:, :3]
         return np.median(arr, axis=0)
 

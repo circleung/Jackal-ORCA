@@ -30,6 +30,9 @@ tutorials/livox_tutorial/livox_ros_driver2/
 # ── 대용량 메시 (바이너리; 선택 범위상 제외) ──
 src/roas2_bringup/meshes/
 
+# ── OMC 세션 메타데이터 (작업 산출물, 커밋 안 함) ──
+.omc/
+
 # ── 파이썬 캐시 ──
 __pycache__/
 *.py[cod]

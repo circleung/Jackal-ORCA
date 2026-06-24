@@ -11,6 +11,7 @@ numpy 로 추가한 것.
 """
 
 import numpy as np
+from scipy import ndimage
 from nav_msgs.msg import OccupancyGrid
 from geometry_msgs.msg import Point
 
@@ -103,32 +104,63 @@ def _dilate(mask: np.ndarray, iterations: int) -> np.ndarray:
     return out
 
 
-def calc_cspace(grid: np.ndarray, padding_cells: int) -> np.ndarray:
+def despeckle(occupied: np.ndarray, min_blob_cells: int = 4) -> np.ndarray:
+    """고립된 점 노이즈(유리 반사 등) 제거: 8-연결 컴포넌트 크기가
+    min_blob_cells 미만이면 occupied 에서 제거.
+
+    단순 erosion(모든 이웃이 occupied 여야 유지)은 두께 1셀짜리 진짜 벽까지
+    지워버려 위험하다 — 그래서 "이웃 개수"가 아니라 "연결된 덩어리 전체 크기"로
+    판단한다. 진짜 벽은 두께가 얇아도 길게 이어져 있어 컴포넌트 크기가 크므로
+    안전하게 보존되고, 흩어진 노이즈 점(보통 1~3셀)만 제거된다.
+    """
+    if min_blob_cells <= 0:
+        return occupied
+    labeled, n = ndimage.label(occupied, structure=np.ones((3, 3), dtype=bool))
+    if n == 0:
+        return occupied
+    sizes = ndimage.sum(occupied, labeled, index=np.arange(1, n + 1))
+    small_labels = np.nonzero(sizes < min_blob_cells)[0] + 1
+    if small_labels.size == 0:
+        return occupied
+    out = occupied.copy()
+    out[np.isin(labeled, small_labels)] = False
+    return out
+
+
+def calc_cspace(grid: np.ndarray, padding_cells: int,
+                despeckle_min_cells: int = 4) -> np.ndarray:
     """장애물을 로봇 반경만큼 팽창한 C-space 통행 가능 마스크.
 
     Args:
         grid: to_numpy() 결과 (h, w)
         padding_cells: 팽창 셀 수 (= robot_radius / resolution 올림)
+        despeckle_min_cells: 이보다 작은 고립 점 노이즈는 팽창 전에 제거
+            (유리 반사 등으로 생긴 점이 좁은 문/통로를 가짜로 막는 것 방지).
+            0 이면 끔.
 
     Returns:
         walkable: bool (h, w). True = 통행 가능(알려진 free & 장애물에서 충분히 떨어짐)
     """
     occupied = grid >= FREE_THRESHOLD
+    occupied = despeckle(occupied, despeckle_min_cells)
     inflated = _dilate(occupied, padding_cells)
     return (grid >= 0) & (grid < FREE_THRESHOLD) & ~inflated
 
 
 def calc_cost_map(grid: np.ndarray, padding_cells: int,
-                  rings: int = 6, ring_cost: float = 4.0) -> np.ndarray:
+                  rings: int = 6, ring_cost: float = 4.0,
+                  despeckle_min_cells: int = 4) -> np.ndarray:
     """벽 근접도 비용 맵 — A* 가 복도 중앙을 선호하게 만든다.
 
     C-space 경계(팽창된 장애물)에서 바깥으로 ring 을 반복 팽창하며
     가까운 ring 일수록 높은 비용을 부여 (원본의 iterative dilation 방식).
+    calc_cspace 와 동일하게 고립 점 노이즈를 먼저 제거해 일관성을 유지한다.
 
     Returns:
         cost: float32 (h, w). 0 = 벽에서 충분히 먼 곳, 클수록 벽에 가까움.
     """
-    occupied = _dilate(grid >= FREE_THRESHOLD, padding_cells)
+    occupied = despeckle(grid >= FREE_THRESHOLD, despeckle_min_cells)
+    occupied = _dilate(occupied, padding_cells)
     cost = np.zeros(grid.shape, dtype=np.float32)
     frontier = occupied
     for i in range(rings):
