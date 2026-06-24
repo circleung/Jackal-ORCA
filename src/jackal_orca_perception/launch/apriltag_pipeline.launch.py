@@ -4,7 +4,7 @@ Brings up two RealSense D435i color streams and two apriltag_ros detectors,
 plus the optional YOLO tag detector and the tag_recorder_node (debug backup —
 authoritative recording is the mini PC's tag_mapper, see claude.md §7.1 F9).
 
-Interface contract (jackal_project_shared/claude.md §5.1):
+Interface contract (see src/jackal_orca_perception/README.md §4):
     /camera_front/color/image_raw      sensor_msgs/Image
     /camera_front/color/camera_info    sensor_msgs/CameraInfo
     /camera_back/color/image_raw       sensor_msgs/Image

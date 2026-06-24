@@ -64,8 +64,8 @@ cd ~/ros2_ws/jackal-ORCA
 colcon build --packages-select custom_msgs jackal_orca_perception
 ```
 
-> ⚠️ `custom_msgs` 는 `/home/jetson/jackal_project_shared/custom_msgs` 에 대한 심볼릭 링크다.
-> `TagCandidate` 메시지를 정의하므로 **삭제하면 YOLO 노드가 빌드/실행되지 않는다.**
+> ⚠️ `custom_msgs` 는 이 레포 내 패키지(`src/custom_msgs`)다. `TagCandidate` 메시지를
+> 정의하므로 **반드시 함께 빌드해야 YOLO 노드가 빌드/실행된다.**
 
 ---
 

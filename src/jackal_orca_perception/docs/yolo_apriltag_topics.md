@@ -31,7 +31,7 @@ Jetson                                  Jackal mini PC
 서보잉 피드백 스트림. mini PC `mission_node`가 받아 `TAG_FOUND → APPROACHING_TAG` 시각 서보잉 수행.
 
 - **메시지 타입:** `custom_msgs/TagCandidate`
-- **정의 파일:** `jackal_project_shared/custom_msgs/msg/TagCandidate.msg`
+- **정의 파일:** `src/custom_msgs/msg/TagCandidate.msg`
 - **발행 조건:** `max_conf >= candidate_threshold(0.30)` **그리고** camera_info 수신 완료
 - **발행 코드:** `tag_yolo_detector_node.py:213-220`
 
