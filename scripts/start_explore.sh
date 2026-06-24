@@ -26,7 +26,8 @@ echo "✓ 플랫폼 감지됨"
 echo "── 옛 스택/좀비 정리 ──"
 for pat in "slam_2d.launch.py" "perception.launch.py" "explore.launch.py" \
            "livox_ros_driver2_node" "async_slam_toolbox_node" \
-           "pointcloud_to_laserscan_node" "frontier_explorer" "pure_pursuit"; do
+           "pointcloud_to_laserscan_node" "frontier_explorer" "pure_pursuit" \
+           "finish_mission_listener"; do
   pids=$(pgrep -f "$pat")
   if [ -n "$pids" ]; then echo "  kill $pat ($pids)"; kill $pids 2>/dev/null; fi
 done
@@ -71,12 +72,16 @@ nohup ros2 launch tag_hotspot_nav perception.launch.py > /tmp/perception.log 2>&
 echo "── [3/3] explore 기동  $EXPLORE_ARGS ──"
 nohup ros2 launch tag_hotspot_nav explore.launch.py $EXPLORE_ARGS > /tmp/explore.log 2>&1 &
 
+# 3b) 종료 자동처리 리스너 (/finish_exploration 받으면 태그 평균지점으로 이동)
+echo "── 종료 리스너 기동 ──"
+nohup python3 "$WS/src/tag_hotspot_nav/scripts/finish_mission_listener.py" > /tmp/finish_listener.log 2>&1 &
+
 # 4) 노드 등록 확인
 echo -n "  노드 등록·DDS 디스커버리 대기 "
 sleep 13; echo ""
 echo "── 기동된 노드 ──"
 ros2 node list 2>/dev/null | grep -E \
-  "slam_toolbox|frontier_explorer|pure_pursuit|tag_collector|map_cleaner|sound_player|stuck_detector" | sort
+  "slam_toolbox|frontier_explorer|pure_pursuit|tag_collector|map_cleaner|sound_player|stuck_detector|finish_mission_listener" | sort
 
 cat <<'EOF'
 
@@ -85,6 +90,7 @@ cat <<'EOF'
    go       # 시작/재개
    pause    # 정지
    save     # 맵 + 정리맵 저장
-로그:  tail -f /tmp/slam_2d.log  /tmp/explore.log
+수동종료(태그 평균지점 이동): ros2 topic pub --times 5 /finish_exploration std_msgs/msg/Bool 'data: true'
+로그:  tail -f /tmp/slam_2d.log  /tmp/explore.log  /tmp/finish_listener.log
 정지:  stop_explore   (플랫폼은 유지됨)
 EOF
