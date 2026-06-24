@@ -4,7 +4,7 @@
 #
 # 사용법 (Jackal에서):
 #   ssh jackal
-#   ~/finish_exploration_now.sh
+#   ~/colcon_ws/src/tag_hotspot_nav/scripts/finish_exploration_now.sh
 #
 # 동작:
 #   1) frontier_explorer 일시정지 — 더 이상 새 탐사 경로를 발행하지 않게 함

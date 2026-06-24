@@ -9,10 +9,10 @@
 hotspot_navigator(여러 hotspot 순회)는 launch 에서 auto_start:=false 로 꺼서
 이 노드와 안 겹치게 한다. 이 노드는 계속 떠서 신호를 기다리는 상시 노드.
 
-사용법 (go.sh 로 탐사 시작한 뒤, 한 번만 실행해두면 계속 대기함):
+사용법 (start_explore 가 자동 기동함. 수동 실행 시):
   ssh jackal
   source /opt/ros/jazzy/setup.bash && source ~/colcon_ws/install/setup.bash
-  python3 ~/finish_mission_listener.py &
+  python3 ~/colcon_ws/src/tag_hotspot_nav/scripts/finish_mission_listener.py &
 """
 import subprocess
 import threading

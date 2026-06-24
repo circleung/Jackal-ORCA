@@ -11,7 +11,7 @@
 사용법 (Jackal 에서):
   ssh jackal
   source /opt/ros/jazzy/setup.bash && source ~/colcon_ws/install/setup.bash
-  python3 ~/finish_mission.py
+  python3 ~/colcon_ws/src/tag_hotspot_nav/scripts/finish_mission.py
 """
 import subprocess
 import time
