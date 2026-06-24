@@ -1,69 +1,74 @@
-# 🚙 Jackal-ORCA Project
+# 🚙 Jackal-ORCA — Jetson Perception
 
-**Jackal UGV project for Obstacle Recognition and Clustering-based Annihilation.**
-ROS2 Humble 기반의 전술적 개척 UGV. Livox LiDAR와 2대의 RealSense 카메라를 융합하여 고밀도 맵을 생성하고, 클러스터링 알고리즘으로 가장 밀집된 장애물 구역을 찾아낸 뒤, 최적의 타격 지점으로 자율주행하여 자폭(개척) 임무를 수행합니다.
+**Jackal UGV 프로젝트의 Jetson(Orin) 인식 파트.**
+RealSense D435i 2대(앞/뒤)의 컬러 영상으로 **AprilTag 검출 + YOLO 태그 탐지**를 수행한다.
+SLAM·주행·미션 제어는 별도 Jackal mini PC가 담당하며, **이 레포는 Jetson에서 돌아가는
+인식 노드/토픽만** 포함한다.
 
-## 🌟 Overview
+> 컴퓨트 분리: **Jetson** = GPU 추론(AprilTag·YOLO), **mini PC** = LiDAR·FAST-LIO2 SLAM·
+> reactive_explorer·mission_node. Jetson은 TF/맵 프레임을 사용하지 않고 검출 결과만 토픽으로 보낸다.
 
-- **Sensor Fusion:** 2대의 Intel Depth Camera와 Livox LiDAR의 3D 포인트 클라우드 데이터 병합
-- **Perception:** 노이즈 필터링, 장애물 인식 및 클러스터링(Clustering) 알고리즘 적용
-- **Navigation:** SLAM 맵핑 및 ORCA 알고리즘 기반 능동형 회피 주행
-- **Platform:** Clearpath Jackal UGV
+## 🌟 처리 경로
 
-## 🛠️ Environment
+- **apriltag_ros 경로** — 기하학적 정밀 검출 (태그 ID·자세)
+- **YOLO 경로** — 학습 모델(YOLOv8s, TensorRT FP16) 기반 빠른 방향(bearing) 추정 →
+  mini PC 시각 서보잉 피드백 (`/yolo/tag_candidate`)
 
-- **OS:** Ubuntu 22.04 LTS (Native or WSL2)
-- **ROS Version:** ROS2 Humble
-- **Hardware:** Intel RealSense (x2), Livox LiDAR
+자세한 노드/토픽/학습 설명은 **[`src/jackal_orca_perception/README.md`](src/jackal_orca_perception/README.md)** 참조.
 
-## 📂 Directory Structure
+## 🛠️ 환경
 
-본 프로젝트는 커스텀 ROS2 패키지, 튜토리얼 샌드박스, 외부 오픈소스 의존성을 단일 레포지토리에서 통합 관리합니다. 레포지토리 최상단이 곧 ROS2 워크스페이스 역할을 합니다.
+- **OS:** Ubuntu 22.04 / **ROS:** ROS 2 Humble / **HW:** Jetson Orin + Intel RealSense D435i ×2
+- **추론 가속:** TensorRT FP16 엔진 (Jetson GPU 전용 — 기기에서 직접 변환)
+
+## 📂 디렉토리 구조
+
+레포 최상단이 곧 ROS 2 워크스페이스다.
 
 ```text
-Jackal-ORCA/
-├── docs/                        # 시스템 아키텍처 다이어그램, 회로도, API 문서
-├── tutorials/                   # 샌드박스 및 튜토리얼 (센서 구동 예제, 데이터 분석 등)
-│   ├── livox_tutorial/
-│   ├── realsense_tutorial/
-│   └── slam_nav2_tutorial/
-├── third_party/                 # 외부 오픈소스 패키지 관리 (.repos 파일 등)
-└── src/                         # 메인 ROS2 커스텀 패키지
-    ├── jackal_orca_bringup/     # 전체 시스템 및 센서 구동용 launch / yaml 파라미터
-    ├── jackal_orca_description/ # 센서가 부착된 Jackal URDF / Xacro 로봇 모델링 파일
-    ├── jackal_orca_perception/  # 센서 데이터 전처리, 장애물 탐지 및 클러스터링 노드
-    ├── jackal_orca_navigation/  # SLAM, Nav2 및 회피 알고리즘 (ORCA) 노드
-    ├── jackal_orca_core/        # 상태 머신 및 최상위 제어 노드
-    └── jackal_orca_msgs/        # 커스텀 Message, Service, Action 정의
+jackal-ORCA/
+├── src/
+│   ├── jackal_orca_perception/   # AprilTag + YOLO 인식 노드 (메인 패키지)
+│   └── custom_msgs/              # TagCandidate / TagPose / TagPoseArray / MissionState
+├── apriltag_print/               # 실물 인쇄용 태그 (36h11 150mm, A4 PDF/PNG)
+└── yolo_train_kit/               # PC용 YOLO 학습 키트 (데이터 생성·학습·TensorRT 변환)
 ```
 
-## 🚀 Getting Started
-
-### 1. Clone the Repository
+## 🚀 빌드 & 실행
 
 ```bash
-# 레포지토리를 복제하고 해당 폴더로 이동합니다.
-git clone [https://github.com/](https://github.com/)[본인 깃허브 계정]/Jackal-ORCA.git
-cd Jackal-ORCA
-```
-
-### 2. Install Dependencies
-
-외부 오픈소스 패키지(RealSense, Livox 드라이버 등)는 `third_party` 폴더 내의 `.repos` 파일을 통해 관리됩니다. (추후 추가 예정)
-
-```bash
-# ROS2 환경 로드
-source /opt/ros/humble/setup.bash
-```
-
-### 3. Build Workspace
-
-본 레포지토리 자체가 ROS2 워크스페이스입니다. `Jackal-ORCA` 최상단 디렉토리에서 빌드를 진행합니다.
-
-```bash
-# 전체 패키지 빌드
-colcon build --symlink-install
-
-# 빌드된 환경 적용
+# 빌드
+cd ~/ros2_ws/jackal-ORCA
+colcon build --packages-select custom_msgs jackal_orca_perception
 source install/setup.bash
+
+# 실제 미션용 파이프라인 (카메라 + apriltag + YOLO)
+ros2 launch jackal_orca_perception apriltag_pipeline.launch.py enable_yolo:=true
+
+# bbox 웹 모니터까지 (브라우저로 검출 영상 확인)
+ros2 launch jackal_orca_perception yolo_web_monitor.launch.py
 ```
+
+> ⚠️ `custom_msgs`(특히 `TagCandidate`)를 먼저 빌드해야 YOLO 노드가 빌드/실행된다.
+
+## 🌐 웹페이지로 검출 영상 보기
+
+`yolo_web_monitor.launch.py`가 카메라+AprilTag+YOLO와 함께 **`web_video_server`**를 띄운다.
+모니터가 없는 Jetson을 SSH로만 붙어도, 같은 네트워크의 브라우저에서 검출 영상을 실시간으로 볼 수 있다.
+
+```bash
+ros2 launch jackal_orca_perception yolo_web_monitor.launch.py        # 포트 변경: port:=9090
+```
+
+브라우저 접속 (USB 직결 `192.168.55.1`, Tailscale `100.75.100.71`, 또는 Jetson IP):
+
+| 화면 | URL |
+|---|---|
+| 전체 토픽 목록 | `http://<jetson-ip>:8080` |
+| 앞 카메라 bbox | `http://<jetson-ip>:8080/stream?topic=/yolo/debug_image_front&type=mjpeg&quality=50&width=640` |
+| 뒤 카메라 bbox | `http://<jetson-ip>:8080/stream?topic=/yolo/debug_image_back&type=mjpeg&quality=50&width=640` |
+
+- bbox 색상: **녹색 = 확정**(conf ≥ 0.55) / 노란색 = 후보(≥ 0.30) / 회색 = 미달.
+- 화질/해상도는 **URL 쿼리 파라미터**다 (`quality` 1–100, `width`/`height` 다운스케일).
+- `/yolo/debug_image_*`는 **구독자가 있을 때만(=브라우저 탭을 열었을 때만)** 그려 발행하므로,
+  평상시(탭 닫음)에는 오버레이 연산 부하가 0이다.

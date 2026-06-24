@@ -1,0 +1,13 @@
+std_msgs/Header header
+uint8 IDLE=0
+uint8 SCANNING=1
+uint8 TAG_FOUND=2
+uint8 APPROACHING_TAG=3
+uint8 SCAN_DONE=4
+uint8 CLUSTERING=5
+uint8 APPROACH_CENTROID=6
+uint8 DONE=7
+uint8 ERROR=8
+uint8 state
+int32 current_target_tag_id
+string status_message

@@ -1,0 +1,6 @@
+std_msgs/Header header
+int32 tag_id
+geometry_msgs/PoseWithCovariance pose
+float64 detection_confidence
+builtin_interfaces/Time last_seen
+string source_camera
